@@ -4,6 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import collections
+import datetime
+import hashlib
 import json
 import random
 import re
@@ -311,6 +314,45 @@ def generate_conversation(args: argparse.Namespace, scenario: Scenario,
     raise GenerationError("; ".join(errors))
 
 
+def file_digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+
+
+def write_manifest(args: argparse.Namespace, generated: int, examples: int, failed: int,
+                   scenarios: dict[int, Scenario], system_prompt: str) -> Path:
+    """Record exactly what produced this file, so a dataset version is reproducible."""
+    here = Path(__file__).resolve().parent
+    counts = {
+        field: dict(collections.Counter(getattr(s, field) for s in scenarios.values()))
+        for field in ("persona", "complication", "intent", "service")
+    }
+    manifest = {
+        "dataset_version": args.dataset_version,
+        "created": datetime.date.today().isoformat(),
+        "conversations": generated,
+        "turn_level_examples": examples,
+        "failed_generations": failed,
+        "generator": {
+            "model": args.model,
+            "temperature": args.temperature,
+            "max_retries": args.max_retries,
+            "quality_gate": not args.no_quality_gate,
+            "seed": args.seed,
+        },
+        "code": {
+            "generate_dataset.py": file_digest(here / "generate_dataset.py"),
+            "check_quality.py": file_digest(here / "check_quality.py"),
+        },
+        "business": {"name": args.business_name, "context": args.business_context},
+        "assistant_system_prompt": system_prompt,
+        "scenario_counts": counts,
+        "data_sha256_16": file_digest(args.out) if args.out.exists() else None,
+    }
+    path = args.out.with_suffix(".manifest.json")
+    path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
 def format_duration(seconds: float) -> str:
     seconds = int(max(seconds, 0))
     if seconds >= 3600:
@@ -353,6 +395,8 @@ def parse_args() -> argparse.Namespace:
                         help="keep conversations that fail the check_quality rules")
     parser.add_argument("--timeout", type=int, default=180, help="per-request timeout in seconds")
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--dataset-version", default="dev",
+                        help="version label recorded in the manifest, e.g. v1")
     parser.add_argument("-w", "--workers", type=int, default=1,
                         help="conversations generated concurrently")
     parser.add_argument("--resume", action="store_true",
@@ -436,6 +480,9 @@ def main() -> int:
                     "error": message,
                 }) + "\n")
 
+    manifest_path = write_manifest(args, generated, example_count, len(failures),
+                                   scenarios, system_prompt)
+
     elapsed = time.time() - started
     print("\n--- summary ---")
     print(f"conversations requested: {args.count}")
@@ -446,6 +493,7 @@ def main() -> int:
         print(f"examples per conversation: {example_count / generated:.1f}")
     print(f"elapsed: {elapsed / 60:.1f} min")
     print(f"output: {args.out}")
+    print(f"manifest: {manifest_path} (dataset_version={args.dataset_version})")
     return 0 if generated else 1
 
 

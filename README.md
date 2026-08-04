@@ -78,6 +78,16 @@ Hyperparameters live in the `Hyperparameters` dataclass at the top of
 `hyperparameters.json` alongside every checkpoint. See
 [docs/TRAINING.md](docs/TRAINING.md) for what each one does and what to change first.
 
+## Versions
+
+Model v1 is the stock `Qwen2.5-1.5B-Instruct` with no fine-tuning — the baseline. v2 is the
+first LoRA, trained on dataset v1. Model and dataset versions are tracked separately and
+pinned to each other in [VERSIONS.md](VERSIONS.md); the rules for bumping either are in
+[docs/VERSIONING.md](docs/VERSIONING.md).
+
+Every generation run writes a manifest recording the generator model, temperature, seed,
+scenario distribution, and SHA-256 hashes of both the data and the code that produced it.
+
 ## Layout
 
 ```
