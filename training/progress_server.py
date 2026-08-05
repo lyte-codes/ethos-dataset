@@ -91,6 +91,129 @@ def parse_generation(log: Path) -> dict:
     }
 
 
+# One DPO optimizer step costs more than one supervised step: it runs the chosen and the
+# rejected response through both the policy and the reference model, and accumulates over
+# twice as many examples. This multiplier is a starting guess, replaced by a measurement as
+# soon as a real DPO run reports its own rate.
+DPO_STEP_MULTIPLIER = 3.0
+DPO_STEPS = 178  # 1421 pairs at batch 1, accumulating 8, for one epoch
+
+# Measured rates are written here as they are observed, so an estimate improves as the
+# night goes on instead of repeating the same guess. The second preference run is timed
+# from the first one's real rate; a later night starts from tonight's measurements.
+CALIBRATION = Path("logs/timings.json")
+
+
+def load_calibration() -> dict:
+    try:
+        return json.loads(CALIBRATION.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def save_calibration(data: dict) -> None:
+    try:
+        CALIBRATION.parent.mkdir(parents=True, exist_ok=True)
+        CALIBRATION.write_text(json.dumps(data, indent=2))
+    except OSError:
+        pass  # a dashboard that cannot cache a timing is still a working dashboard
+
+
+def dpo_progress(name: str) -> dict:
+    """Progress of a preference run from its own log, if one is going."""
+    log = Path("logs") / f"{name}.log"
+    if not log.exists():
+        return {}
+    return parse_log_tail(log)
+
+
+def pipeline_stages(sft: dict) -> list[dict]:
+    """The four builds, what state each is in, and how long until it exists.
+
+    Times for stages that have not started are estimates and say so. A dashboard that
+    presents a guess in the same voice as a measurement teaches you to distrust both.
+    """
+    step = sft.get("step") or 0
+    total = sft.get("max_steps") or 1014
+    rate = sft.get("sec_per_step") or 0
+    epoch_two_step = round(total / 3 * 2)
+
+    def seconds_to(target_step: int) -> float | None:
+        if not rate or step >= target_step:
+            return None
+        return (target_step - step) * rate
+
+    sft_running = is_running("train_lora.py")
+    v4_done = Path("checkpoints/ethos-v4-epoch2/adapter_model.safetensors").exists()
+    v6_done = Path("checkpoints/ethos-v4/adapter_model.safetensors").exists()
+
+    stages = []
+
+    stages.append({
+        "key": "v4", "label": "v4 — supervised, epoch 2", "release": "nightly.1",
+        "state": "done" if v4_done else "running" if sft_running else "waiting",
+        "eta": None if v4_done else seconds_to(epoch_two_step),
+        "estimated": False, "confidence": "measured",
+        "detail": f"snapshot at step {epoch_two_step}",
+    })
+
+    stages.append({
+        "key": "v6", "label": "v6 — supervised, epoch 3", "release": "nightly.2",
+        "state": "done" if v6_done else "running" if sft_running else "waiting",
+        "eta": None if v6_done else seconds_to(total),
+        "estimated": False, "confidence": "measured",
+        "detail": f"same run, through step {total}",
+    })
+
+    # The preference runs queue behind the supervised one, so their clock starts when it ends.
+    queue = seconds_to(total) or 0
+    calibration = load_calibration()
+    if rate:
+        calibration["sft_sec_per_step"] = round(rate, 2)
+
+    # Anything a preference run has already reported beats the guess, for itself and for
+    # the one queued behind it.
+    live_runs = {key: dpo_progress(f"{key}-dpo") for key in ("v5", "v7")}
+    for live in live_runs.values():
+        if live.get("sec_per_step"):
+            calibration["dpo_sec_per_step"] = round(live["sec_per_step"], 2)
+            calibration["dpo_total_steps"] = live.get("max_steps") or DPO_STEPS
+            if rate:
+                calibration["dpo_multiplier"] = round(live["sec_per_step"] / rate, 2)
+
+    dpo_rate = calibration.get("dpo_sec_per_step")
+    dpo_steps = calibration.get("dpo_total_steps", DPO_STEPS)
+    multiplier = calibration.get("dpo_multiplier", DPO_STEP_MULTIPLIER)
+    if dpo_rate:
+        per_run, confidence = dpo_rate * dpo_steps, "calibrated"
+    else:
+        per_run, confidence = (rate or 0) * multiplier * dpo_steps, "guess"
+
+    pending = 0.0
+    for key, release, base in [("v5", "nightly.3", "v4"), ("v7", "nightly.4", "v6")]:
+        done = Path(f"checkpoints/ethos-{key}/adapter_model.safetensors").exists()
+        live = live_runs[key]
+        if done:
+            state, eta, level = "done", None, "measured"
+        elif live.get("step"):
+            state = "running"
+            eta = (live["max_steps"] - live["step"]) * (live.get("sec_per_step") or 0)
+            level = "measured"
+        else:
+            state = "waiting"
+            pending += per_run
+            eta = queue + pending
+            level = confidence
+        stages.append({
+            "key": key, "label": f"{key} — preference training on {base}", "release": release,
+            "state": state, "eta": eta, "estimated": level != "measured", "confidence": level,
+            "detail": f"DPO from {base}",
+        })
+
+    save_calibration(calibration)
+    return stages
+
+
 def collect(output: Path, log: Path, pattern: str,
             generation_log: Path | None = None) -> dict:
     state: dict = {"running": is_running(pattern), "log": [], "max_grad_norm": None}
@@ -127,6 +250,8 @@ def collect(output: Path, log: Path, pattern: str,
     state.update({k: v for k, v in parse_log_tail(log).items() if v is not None})
     if state["stage"] == "idle" and state.get("log"):
         state["stage"] = "training"
+
+    state["stages"] = pipeline_stages(state)
 
     # The clip ceiling is what actually reaches the weights, so the dashboard needs it
     # to put a spike in context. Only recorded in the checkpoint's training_args.

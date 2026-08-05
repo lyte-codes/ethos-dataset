@@ -130,6 +130,28 @@
     letter-spacing: .06em; text-transform: uppercase;
   }
   .stage.live .mark, .stage.live .state, .stage.done .mark { color: var(--accent); }
+  .stage .when {
+    font-family: var(--mono); font-size: .78rem; font-variant-numeric: tabular-nums;
+    color: var(--muted); text-align: right; white-space: nowrap;
+  }
+  .stage .when em { font-style: normal; opacity: .65; }
+  .stage.done .when { color: var(--accent); }
+  .stage .release {
+    font-family: var(--mono); font-size: .66rem; color: var(--muted);
+    letter-spacing: .04em;
+  }
+  .stage-row {
+    display: grid; grid-template-columns: 1.4rem 1fr auto auto; gap: .5rem .85rem;
+    align-items: baseline; padding: .6rem 0; border-bottom: 1px solid var(--edge);
+    font-size: .9rem;
+  }
+  .stage-row:last-of-type { border-bottom: none; }
+  .stage-row .mark { font-family: var(--mono); text-align: center; color: var(--muted); }
+  .stage-row.live .mark, .stage-row.done .mark { color: var(--accent); }
+  .stage-row.live .when { color: var(--accent); }
+  .footnote {
+    font-size: .78rem; color: var(--muted); line-height: 1.6; max-width: 62ch; margin-top: .4rem;
+  }
 
   .notes { display: flex; flex-direction: column; gap: .75rem; }
   .note { display: grid; grid-template-columns: auto 1fr; gap: .75rem; align-items: start; font-size: .9rem; }
@@ -232,27 +254,18 @@
   <section class="card notes" id="notes"></section>
 
   <section class="card pipe" id="pipeline">
-    <div class="label">Pipeline</div>
-    <div class="stage" data-stage="dataset">
-      <span class="mark">·</span>
-      <span>Dataset <strong>ethos-booking-v2</strong> — outbound-agent calls</span>
-      <span class="state" id="p-dataset">—</span>
+    <div class="prog-head">
+      <div class="label">Tonight's builds</div>
+      <div class="label">published in the order they are made</div>
     </div>
-    <div class="stage" data-stage="prefs">
-      <span class="mark">·</span>
-      <span>Preferences <strong>v2</strong> — corrupted-detail pairs</span>
-      <span class="state" id="p-prefs">Waiting</span>
-    </div>
-    <div class="stage" data-stage="v4">
-      <span class="mark">·</span>
-      <span>Model <strong>v4</strong> — supervised LoRA</span>
-      <span class="state" id="p-v4">Waiting</span>
-    </div>
-    <div class="stage" data-stage="v5">
-      <span class="mark">·</span>
-      <span>Model <strong>v5</strong> — DPO against invented details</span>
-      <span class="state" id="p-v5">Waiting</span>
-    </div>
+    <div id="stages"></div>
+    <p class="footnote">
+      v4 and v6 are one supervised run, snapshotted at the end of epoch 2 and epoch 3.
+      v5 and v7 apply the same preference training to each. Times sharpen as the night goes on:
+      <em>rough</em> is extrapolated from the supervised rate, <em>est.</em> means a preference
+      run has since been timed and its real rate is in use, and an unmarked time is measured
+      from the run itself.
+    </p>
   </section>
 
   <footer>
@@ -452,24 +465,45 @@ function renderGeneration(d) {
   el("g-rate").textContent = g.sec_per_conversation ? `${g.sec_per_conversation.toFixed(0)}s / conv` : "—";
 }
 
-function renderPipeline(d) {
-  const g = d.generation;
-  const datasetDone = g && !g.running && g.conversations >= g.target;
-  const states = {
-    "p-dataset": g ? (g.running ? "Generating" : datasetDone ? "Done" : "Stopped") : "Waiting",
-    "p-prefs": datasetDone ? "Ready" : "Waiting",
-    "p-v4": d.stage === "training" ? "Training" : (d.log.length ? "Stopped" : "Waiting"),
-    "p-v5": "Waiting",
-  };
-  for (const [id, text] of Object.entries(states)) el(id).textContent = text;
+function clockAfter(seconds) {
+  const when = new Date(Date.now() + seconds * 1000);
+  const sameDay = when.toDateString() === new Date().toDateString();
+  const time = when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  return sameDay ? time : time + " +1d";
+}
 
-  document.querySelectorAll(".stage").forEach(node => {
-    const state = node.querySelector(".state").textContent;
-    node.classList.toggle("live", state === "Generating" || state === "Training");
-    node.classList.toggle("done", state === "Done");
-    node.querySelector(".mark").textContent =
-      state === "Done" ? "✓" : (state === "Generating" || state === "Training") ? "▸" : "·";
-  });
+function humanDuration(seconds) {
+  const hours = Math.floor(seconds / 3600), minutes = Math.round((seconds % 3600) / 60);
+  return hours ? `${hours}h ${String(minutes).padStart(2, "0")}m` : `${minutes}m`;
+}
+
+function renderPipeline(d) {
+  const host = el("stages");
+  host.replaceChildren();
+  for (const stage of d.stages || []) {
+    const row = document.createElement("div");
+    row.className = "stage-row " + (stage.state === "running" ? "live" : stage.state);
+
+    const mark = stage.state === "done" ? "✓" : stage.state === "running" ? "▸" : "·";
+    let when;
+    if (stage.state === "done") {
+      when = "done";
+    } else if (stage.eta == null) {
+      when = "—";
+    } else {
+      when = `${clockAfter(stage.eta)} · ${humanDuration(stage.eta)}`;
+      // Say how much to trust the number, not just what it is.
+      const tag = { guess: "rough", calibrated: "est." }[stage.confidence];
+      if (tag) when = `<em>${tag}</em> ${when}`;
+    }
+
+    row.innerHTML =
+      `<span class="mark">${mark}</span>` +
+      `<span>${stage.label}<br><span class="release">${stage.release} · ${stage.detail}</span></span>` +
+      `<span class="state">${stage.state}</span>` +
+      `<span class="when">${when}</span>`;
+    host.appendChild(row);
+  }
 }
 
 function render(d) {
