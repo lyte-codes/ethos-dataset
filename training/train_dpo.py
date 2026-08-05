@@ -63,6 +63,9 @@ def main() -> int:
     parser.add_argument("--beta", type=float, default=None,
                         help="how hard to push away from rejected responses; higher stays closer to the SFT model")
     parser.add_argument("--epochs", type=int, default=None)
+    parser.add_argument("--batch-size", type=int, default=None,
+                        help="per-device batch size; keep at 1 on MPS — DPO holds policy and "
+                             "reference logits at once, so it needs more room than SFT did")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
@@ -71,6 +74,8 @@ def main() -> int:
         hyperparameters.beta = args.beta
     if args.epochs:
         hyperparameters.epochs = args.epochs
+    if args.batch_size:
+        hyperparameters.per_device_batch_size = args.batch_size
 
     device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
     print(f"device: {device}")
@@ -83,8 +88,10 @@ def main() -> int:
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
+    # Same reasoning as train_lora.py: bf16 only pays off on CUDA, and MPS is more reliable
+    # in fp32. `dtype` rather than the deprecated `torch_dtype`.
     model = AutoModelForCausalLM.from_pretrained(
-        args.base_model, torch_dtype=torch.bfloat16 if device != "cpu" else torch.float32
+        args.base_model, dtype=torch.bfloat16 if device == "cuda" else torch.float32
     )
     model = PeftModel.from_pretrained(model, str(args.sft_adapter), is_trainable=True)
 
@@ -102,6 +109,7 @@ def main() -> int:
         max_prompt_length=hyperparameters.max_prompt_length,
         warmup_ratio=hyperparameters.warmup_ratio,
         logging_steps=10,
+        gradient_checkpointing=True,
         save_strategy="epoch",
         bf16=(device == "cuda"),
         seed=args.seed,
