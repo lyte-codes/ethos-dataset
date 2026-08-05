@@ -89,7 +89,22 @@ Call type: {intent_description}
 Caller persona ({persona}): {persona_description}
 Complication: {complication_description}
 
+{checklist}
 Write the full call as JSON."""
+
+BOOKING_CHECKLIST = """Before you finish, check the call contains all of these:
+1. the caller says a phone number out loud, as digits, in a caller turn
+2. the caller and assistant settle on a specific weekday and a clock time
+3. the caller gives their name
+4. the last assistant turn reads back the service, the weekday, the clock time, the name and the phone number
+5. the assistant never states a name, number, day or time before the caller has said it
+"""
+
+CANCELLATION_CHECKLIST = """Before you finish, check the call contains all of these:
+1. the caller gives their name and enough detail to identify the existing appointment
+2. the assistant confirms the cancellation explicitly
+3. the assistant never states a name, number, day or time before the caller has said it
+"""
 
 BAR_WIDTH = 24
 MIN_TURNS = 8
@@ -143,13 +158,38 @@ def sample_scenario(rng: random.Random) -> Scenario:
     )
 
 
+def conversation_schema(min_turns: int, max_turns: int) -> dict:
+    """Constrain decoding to the turn structure, so shape errors cannot occur at all."""
+    return {
+        "type": "object",
+        "properties": {
+            "turns": {
+                "type": "array",
+                "minItems": min_turns,
+                "maxItems": max_turns,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "speaker": {"type": "string", "enum": ["caller", "assistant"]},
+                        "text": {"type": "string"},
+                    },
+                    "required": ["speaker", "text"],
+                },
+            }
+        },
+        "required": ["turns"],
+    }
+
+
 def call_ollama(base_url: str, model: str, temperature: float, timeout: int, scenario: Scenario,
-                business_name: str, business_context: str) -> str:
+                business_name: str, business_context: str, schema: dict | None = None,
+                num_predict: int = 2048, keep_alive: str = "30m") -> str:
     payload = {
         "model": model,
         "stream": False,
-        "format": "json",
-        "options": {"temperature": temperature, "top_p": 0.95, "num_predict": 2048},
+        "format": schema if schema is not None else "json",
+        "keep_alive": keep_alive,
+        "options": {"temperature": temperature, "top_p": 0.95, "num_predict": num_predict},
         "messages": [
             {"role": "system", "content": GENERATOR_SYSTEM_PROMPT},
             {
@@ -162,6 +202,8 @@ def call_ollama(base_url: str, model: str, temperature: float, timeout: int, sce
                     persona=scenario.persona,
                     persona_description=PERSONAS[scenario.persona],
                     complication_description=COMPLICATIONS[scenario.complication],
+                    checklist=(CANCELLATION_CHECKLIST if scenario.intent == "cancellation"
+                               else BOOKING_CHECKLIST),
                 ),
             },
         ],
@@ -294,11 +336,14 @@ def generate_conversation(args: argparse.Namespace, scenario: Scenario,
     errors = []
     for attempt in range(1, args.max_retries + 1):
         try:
+            min_turns = minimum_turns(scenario)
             raw = call_ollama(
                 args.base_url, args.model, args.temperature, args.timeout,
                 scenario, args.business_name, args.business_context,
+                schema=None if args.no_schema else conversation_schema(min_turns, args.max_turns),
+                num_predict=args.num_predict,
             )
-            turns = parse_conversation(raw, minimum_turns(scenario))
+            turns = parse_conversation(raw, min_turns)
             if not args.no_quality_gate:
                 problems = conversation_problems(
                     [("user" if t.speaker == "caller" else "assistant", t.text) for t in turns],
@@ -391,6 +436,12 @@ def parse_args() -> argparse.Namespace:
         default="A local services business that books appointments by phone, weekdays 8am to 6pm and Saturday mornings.",
     )
     parser.add_argument("--max-retries", type=int, default=5)
+    parser.add_argument("--no-schema", action="store_true",
+                        help="use free-form JSON instead of constrained decoding")
+    parser.add_argument("--max-turns", type=int, default=16,
+                        help="upper bound enforced by the schema")
+    parser.add_argument("--num-predict", type=int, default=1400,
+                        help="token budget per conversation")
     parser.add_argument("--no-quality-gate", action="store_true",
                         help="keep conversations that fail the check_quality rules")
     parser.add_argument("--timeout", type=int, default=180, help="per-request timeout in seconds")

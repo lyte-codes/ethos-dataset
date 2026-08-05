@@ -17,6 +17,7 @@ CLOCK = re.compile(
     re.IGNORECASE,
 )
 DIGIT_RUN = re.compile(r"\d[\d\s\-().]{5,}\d")
+PRICE = re.compile(r"[$£€]\s?\d+|\b\d+\s?(?:dollars|pounds|euros)\b", re.IGNORECASE)
 HOUR = re.compile(r"\b(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm|a\.m\.|p\.m\.|o'?\s?clock)", re.IGNORECASE)
 WEEKDAY = re.compile(r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", re.IGNORECASE)
 
@@ -114,6 +115,14 @@ def conversation_problems(turns: list[tuple[str, str]], intent: str, business_wo
         if PLACEHOLDER.search(text):
             problems.append(f"placeholder text in assistant turn: {PLACEHOLDER.search(text).group()!r}")
         seen |= known_tokens(text)
+
+    first_caller_turn = next((text for role, text in turns if role == "user"), "")
+    if PHONE.search(first_caller_turn):
+        problems.append("caller opens the call with a phone number")
+    for role, text in turns:
+        if role == "assistant" and PRICE.search(text):
+            problems.append(f"assistant quotes a specific price ({PRICE.search(text).group().strip()!r})")
+            break
 
     if intent == "new_booking" and not PHONE.search(caller_text):
         problems.append("no phone number given by the caller")
