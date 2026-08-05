@@ -9,9 +9,10 @@ the repo's history, and map one-to-one onto the build ids in docs/RELEASES.md.
     python3 training/publish_build.py --adapter checkpoints/ethos-v4 --lineage v4
     python3 training/publish_build.py --adapter checkpoints/ethos-v4 --lineage v4 --dry-run
 
-The version is derived, not passed: <target>-nightly.<YYYYMMDD>.<n>, where n counts
-that day's builds. Two builds on one day would otherwise collide, and a build that
-answers to another build's name breaks everything downstream of it.
+The version is derived, not passed: <target>-nightly.<YYYYMMDD><letter>, where the letter
+counts that day's builds — 20260805a, then b, then c. Two builds on one day would
+otherwise collide, and a build that answers to another build's name breaks everything
+downstream of it.
 """
 
 from __future__ import annotations
@@ -50,18 +51,35 @@ def dirty_tree() -> bool:
     return bool(result.stdout.strip())
 
 
-def next_ordinal(target: str, day: str, registry: Path) -> int:
-    """Builds already published today decide this one's number."""
+def suffix_for(index: int) -> str:
+    """0 -> a, 25 -> z, 26 -> aa. Spreadsheet columns, for the same reason they use them."""
+    letters = ""
+    index += 1
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        letters = chr(ord("a") + remainder) + letters
+    return letters
+
+
+def index_of(suffix: str) -> int:
+    value = 0
+    for character in suffix:
+        value = value * 26 + (ord(character) - ord("a") + 1)
+    return value - 1
+
+
+def next_suffix(target: str, day: str, registry: Path) -> str:
+    """Builds already published today decide this one's letter."""
     if not registry.exists():
-        return 1
-    pattern = re.compile(rf"^{re.escape(target)}-nightly\.{day}\.(\d+)$")
-    highest = 0
+        return suffix_for(0)
+    pattern = re.compile(rf"^{re.escape(target)}-nightly\.{day}([a-z]+)$")
+    highest = -1
     with registry.open(encoding="utf-8") as handle:
         for line in handle:
             match = pattern.match(json.loads(line).get("version", ""))
             if match:
-                highest = max(highest, int(match.group(1)))
-    return highest + 1
+                highest = max(highest, index_of(match.group(1)))
+    return suffix_for(highest + 1)
 
 
 def main() -> int:
@@ -84,8 +102,7 @@ def main() -> int:
         parser.error(f"{weights} not found — is this a finished adapter?")
 
     day = date.today().strftime("%Y%m%d")
-    ordinal = next_ordinal(args.target, day, args.registry)
-    version = f"{args.target}-nightly.{day}.{ordinal}"
+    version = f"{args.target}-nightly.{day}{next_suffix(args.target, day, args.registry)}"
     stage = args.stage or ("dpo" if "dpo" in args.adapter.name or args.lineage in {"v5", "v7"} else "sft")
 
     # Hash every asset, not just the weights: a build is identified by everything that
