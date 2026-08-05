@@ -16,12 +16,12 @@ tweak and for a total change of what the agent does.
 ```
 lineage        dataset ethos-booking-v2  ->  model v7            immutable, internal
                                               |
-release        2.1-nightly.20260805.a3f9c21                    immutable, published
+release        2.1-nightly.20260805.2                          immutable, published
                                               |
 channel        nightly -> beta -> stable                         mutable pointers
 ```
 
-**Builds are immutable.** Once `2.1-nightly.20260805.a3f9c21` exists it is never rebuilt or
+**Builds are immutable.** Once `2.1-nightly.20260805.2` exists it is never rebuilt or
 overwritten. If it is wrong, it is superseded, never edited.
 
 **Channels are pointers.** `stable` is a name for whichever build is currently shipped, the way
@@ -55,12 +55,23 @@ Minor goes up; that is the whole scheme.
 Semver precedence orders these correctly, which is why the format is worth keeping to:
 
 ```
-2.1-nightly.20260805.a3f9c21   <   2.1-rc.3   <   2.1
+2.1-nightly.20260805.1   <   2.1-nightly.20260805.2   <   2.1-rc.3   <   2.1
 ```
 
-- **nightly** — `<next-version>-nightly.<YYYYMMDD>.<git-sha8>`. One per training run.
+- **nightly** — `<next-version>-nightly.<YYYYMMDD>.<n>`, where `n` counts builds that day from 1.
 - **rc** — `<next-version>-rc.<n>`. A nightly that cleared the full eval suite and is soaking.
 - **stable** — `<major>.<minor>`. Promoted from an rc. Never built directly.
+
+The per-day counter is not decoration. More than one build a day is the normal case, not the
+exception — a supervised run and the preference run stacked on top of it finish hours apart on
+the same date, and neither needs a code change between them. Keying on the date alone, or on
+the date plus the commit, would give both the same identifier and two different sets of weights
+would answer to one name. Semver compares numeric identifiers numerically, so the counter also
+orders the day's builds correctly, which a git sha never could.
+
+The commit and the training stage are recorded in the registry rather than the version string.
+They are worth knowing, but they are not what makes a build unique, and a version number that
+carries every useful fact stops being a name and becomes a description.
 
 A nightly carries the version it is *heading toward*. Most days that is the next minor:
 running against a shipped 2.0 produces `2.1-nightly.…`. If the role changed, it is
@@ -93,7 +104,7 @@ publishing something unevaluated.
 2. **Train** from the current base, writing `hyperparameters.json` and the dataset hash into
    the checkpoint.
 3. **Evaluate** against the regression set (below). Fail the run on any hard gate.
-4. **Publish** as `…-nightly.<date>.<sha>` and repoint the `nightly` channel.
+4. **Publish** as `…-nightly.<date>.<n>` and repoint the `nightly` channel.
 5. **Record** the build in the registry with everything needed to rebuild it.
 
 Because nightlies are immutable and cheap to keep, a regression that appears on the 12th is
@@ -132,7 +143,7 @@ One row per build, append-only, never edited:
 
 ```json
 {
-  "version": "2.1-nightly.20260805.a3f9c21",
+  "version": "2.1-nightly.20260805.2",
   "channel": "nightly",
   "created": "2026-08-05T03:14:00Z",
   "lineage": { "model": "v7", "dataset": "ethos-booking-v2" },
@@ -140,9 +151,9 @@ One row per build, append-only, never edited:
   "adapter_sha256": "…",
   "dataset_sha256": "…",
   "code_sha": "a3f9c21",
-  "training": { "stage": "dpo", "from": "2.0", "hyperparameters": "…" },
+  "training": { "stage": "dpo", "from": "2.1-nightly.20260805.1", "hyperparameters": "…" },
   "eval": { "invented_details": 0, "completion_rate": 0.94, "readback_verified": 0.88 },
-  "supersedes": "2.1-nightly.20260804.7c1e0b4"
+  "supersedes": "2.1-nightly.20260805.1"
 }
 ```
 
