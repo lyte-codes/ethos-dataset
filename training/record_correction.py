@@ -26,39 +26,30 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 STORE = Path("private/corrections.jsonl")
 
-# Redaction happens on the way in, not on the way out. A store that holds raw numbers is
-# one export away from leaking them, and nothing downstream needs the real digits — the
-# model has to learn "say the number from the brief", not any particular number.
-PHONE = re.compile(r"(?:\d[\s\-().]*){6,}\d")
+# Scrubbing happens on the way in, not on the way out. A store holding real details is one
+# export away from leaking them, and nothing downstream needs them — the model has to learn
+# "say the number from the brief", not any particular number.
+BRIEF_NAME = re.compile(r"- Name:\s*(.+)")
 
 
-def redact(text: str, mapping: dict[str, str]) -> str:
-    """Replace real numbers with stable stand-ins, consistently within one correction."""
-    def swap(match: re.Match) -> str:
-        digits = re.sub(r"\D", "", match.group())
-        if digits not in mapping:
-            # Ofcom's drama range: valid-looking, unreachable, and obviously not real.
-            mapping[digits] = f"07700 900{len(mapping):03d}"
-        return mapping[digits]
+def record(store: Path, entry: dict, scrub_details: bool = True,
+           known_names: list[str] | None = None) -> None:
+    if scrub_details:
+        from scrub import scrub_correction
 
-    return PHONE.sub(swap, text)
-
-
-def record(store: Path, entry: dict, redact_numbers: bool = True) -> None:
-    if redact_numbers:
-        mapping: dict[str, str] = {}
-        entry["messages"] = [
-            {**message, "content": redact(message["content"], mapping)}
-            for message in entry["messages"]
-        ]
-        entry["rejected"] = redact(entry["rejected"], mapping)
-        entry["chosen"] = redact(entry["chosen"], mapping)
-        entry["redacted"] = True
+        names = list(known_names or [])
+        match = BRIEF_NAME.search(entry["messages"][0]["content"])
+        if match:
+            names.append(match.group(1).strip())
+        entry = scrub_correction(entry, known_names=names)
 
     store.parent.mkdir(parents=True, exist_ok=True)
     with store.open("a", encoding="utf-8") as handle:
@@ -98,8 +89,10 @@ def main() -> int:
     parser.add_argument("--build", default="unknown", help="which build made the mistake")
     parser.add_argument("--store", type=Path, default=STORE)
     parser.add_argument("--agent-name", default="Ethos")
-    parser.add_argument("--keep-real-numbers", action="store_true",
-                        help="skip redaction — only for data that is already synthetic")
+    parser.add_argument("--name", action="append", default=[],
+                        help="a real name to scrub beyond the client's; repeatable")
+    parser.add_argument("--keep-real-details", action="store_true",
+                        help="skip scrubbing — only for data that is already synthetic")
     args = parser.parse_args()
 
     if not args.call:
@@ -122,10 +115,14 @@ def main() -> int:
         "messages": messages,
         "chosen": args.should_have_said,
         "rejected": rejected,
-    }, redact_numbers=not args.keep_real_numbers)
+    }, scrub_details=not args.keep_real_details, known_names=args.name)
 
     total = sum(1 for _ in args.store.open(encoding="utf-8"))
     print(f"recorded to {args.store} ({total} correction{'s' if total != 1 else ''} held)")
+    if args.keep_real_details:
+        print("WARNING: stored unscrubbed — only do this for already-synthetic data")
+    else:
+        print("names, numbers, emails and postcodes replaced with random plausible stand-ins")
     print("this file is gitignored and stays on this machine")
     return 0
 
