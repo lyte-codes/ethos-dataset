@@ -30,11 +30,13 @@ ASSETS = ["adapter_model.safetensors", "adapter_config.json", "hyperparameters.j
 
 
 def digest(path: Path) -> str:
+    """Full SHA-256. Truncated digests are fine for spotting a change and useless for
+    proving one did not happen — a published artifact deserves the whole thing."""
     sha = hashlib.sha256()
     with path.open("rb") as handle:
         for block in iter(lambda: handle.read(1 << 20), b""):
             sha.update(block)
-    return sha.hexdigest()[:16]
+    return sha.hexdigest()
 
 
 def git_sha() -> str:
@@ -86,13 +88,24 @@ def main() -> int:
     version = f"{args.target}-nightly.{day}.{ordinal}"
     stage = args.stage or ("dpo" if "dpo" in args.adapter.name or args.lineage in {"v5", "v7"} else "sft")
 
+    # Hash every asset, not just the weights: a build is identified by everything that
+    # ships with it, and a config that drifted is as much a different build as new weights.
+    digests = {name: digest(args.adapter / name)
+               for name in ASSETS if (args.adapter / name).exists()}
+    dataset_digest = ""
+    manifest = Path(f"data/{args.dataset.replace('ethos-booking-', 'ethos_booking_')}.manifest.json")
+    if manifest.exists():
+        dataset_digest = json.loads(manifest.read_text()).get("data_sha256_16", "")
+
     entry = {
         "version": version,
         "channel": "nightly",
         "created": f"{date.today().isoformat()}",
         "lineage": {"model": args.lineage, "dataset": args.dataset},
         "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
-        "adapter_sha256": digest(weights),
+        "adapter_sha256": digests.get("adapter_model.safetensors", ""),
+        "asset_sha256": digests,
+        "dataset_sha256_16": dataset_digest,
         "code_sha": git_sha(),
         "training": {"stage": stage},
         "notes": args.notes,
@@ -110,11 +123,22 @@ def main() -> int:
         return 0
 
     assets = [str(args.adapter / name) for name in ASSETS if (args.adapter / name).exists()]
+
+    # Shipped alongside the assets in the usual format, so a download can be checked with
+    # `shasum -a 256 -c SHA256SUMS` rather than by eye.
+    checksums = args.adapter / "SHA256SUMS"
+    checksums.write_text("".join(f"{value}  {name}\n" for name, value in sorted(digests.items())))
+    assets.append(str(checksums))
+
+    rows = "\n".join(f"| `{name}` | `{value}` |" for name, value in sorted(digests.items()))
     body = (f"Automated nightly build.\n\n"
             f"- lineage: model {args.lineage} on `{args.dataset}`\n"
             f"- stage: {stage}\n"
-            f"- adapter sha256: `{entry['adapter_sha256']}`\n"
-            f"- code: `{entry['code_sha']}`\n\n"
+            f"- code: `{entry['code_sha']}`\n"
+            f"- dataset: `{dataset_digest or 'unrecorded'}`\n\n"
+            f"**SHA-256**\n\n"
+            f"| asset | sha256 |\n|---|---|\n{rows}\n\n"
+            f"Verify with `shasum -a 256 -c SHA256SUMS`.\n\n"
             f"{args.notes}\n\n"
             f"Not promoted. Nightlies have not cleared the eval gate in "
             f"[docs/RELEASES.md](docs/RELEASES.md) and should not be served.")
