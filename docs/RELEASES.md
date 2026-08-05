@@ -93,11 +93,36 @@ is right for anyone who wants fixes automatically.
 
 ---
 
-## The daily run
+## Cadence
 
-A nightly is not just "train again" — it is the full chain, and any step failing means no
-nightly is published that day. Publishing nothing is a normal outcome and better than
-publishing something unevaluated.
+Build on **change**, with one scheduled full run overnight as the floor. Nothing is gained by
+rebuilding on a clock when the inputs have not moved — twenty-four models a day off an
+unchanged dataset differ only by sampling noise, and every one of them is another candidate to
+bisect through when a regression appears.
+
+More than one build a day is normal on an active day, but they should not all be full builds.
+The stages cost very different amounts, so a build only reruns from the earliest stage the
+change actually touched:
+
+| Change | Cheapest stage that covers it | Cost |
+|---|---|---|
+| Generator prompt, quality rules, scenario taxonomy | regenerate the dataset, then everything after | ~6h |
+| Dataset version, LoRA rank, learning rate, epochs | supervised training, then preference training | ~4h |
+| Preference pairs, DPO beta | preference training on the existing adapter | ~1–2h |
+| Eval set, a metric definition, a threshold | evaluate the existing build | minutes |
+
+That is what makes several builds a day affordable: one full run overnight, and anything
+triggered during the day scoped to the stage that changed. Re-running preference training on an
+adapter that already exists publishes in an hour or two rather than six.
+
+An eval-only run is cheap enough to do freely, and worth doing whenever a threshold moves — it
+re-scores existing builds against the new bar without producing a new artifact at all.
+
+## What a full run does
+
+A full build is not just "train again" — it is the whole chain, and any step failing means no
+build is published. Publishing nothing is a normal outcome and better than publishing something
+unevaluated.
 
 1. **Generate** the day's delta data with the pinned generator, appending a new dataset
    version if the generator or quality rules changed.
@@ -188,6 +213,10 @@ Tuesday than it did on Monday makes every bug report unfalsifiable.
 - **Serve adapters, not merged models.** One base model in memory with LoRA adapters swapped
   per version makes running `stable` and `beta` side by side cheap, and makes rollback a
   pointer change rather than a redeploy.
+- **Publish the adapter, not the checkpoint.** A training checkpoint is roughly 227MB, but
+  two thirds of that is optimizer state that exists only so training can resume. The adapter
+  itself is around 70MB, and it is the only part a served build needs. Keeping whole
+  checkpoints makes retention look three times more expensive than it is.
 - **Pin the base model exactly.** A base model that silently updates underneath a pinned
   adapter version breaks the reproducibility the whole scheme is built on.
 - **Version the system prompt with the model.** The brief format the agent is trained against
