@@ -11,26 +11,35 @@ See [docs/VERSIONING.md](docs/VERSIONING.md) for when to bump which number.
 | Version | What it is | Base | Trained on | Status |
 |---|---|---|---|---|
 | **v1** | Stock `Qwen2.5-1.5B-Instruct`, no fine-tuning. The baseline every later version is measured against. | — | nothing | available (just the base model) |
-| **v2** | First LoRA fine-tune (supervised). Learns the job: one question at a time, read the booking back. | Qwen2.5-1.5B-Instruct | `ethos-booking-v1` | not trained yet |
-| **v3** | v2 plus preference training that penalises inventing caller details — wrong phone numbers above all. | model v2 | `ethos-preferences-v1` | not trained yet |
+| **v2** | First LoRA attempt (supervised), on the **receptionist** role. | Qwen2.5-1.5B-Instruct | `ethos-booking-v1` | **abandoned** — killed at step 267/828 when the role was found to be inverted. `checkpoints/ethos-v2/checkpoint-200` and `-250` survive; do not build on them. |
+| **v4** | First LoRA on the correct **outbound agent** role. | Qwen2.5-1.5B-Instruct | `ethos-booking-v2` | not trained yet |
+| **v5** | v4 plus preference training that penalises stating details the brief never contained — wrong phone digits above all. | model v4 | `ethos-preferences-v2` | not trained yet |
 
-### Why the penalty is v3 and not v2
+v3 is deliberately skipped. It was reserved for DPO on top of the receptionist v2, and reusing
+the number for something trained on a different role would make the table lie about what
+descends from what.
+
+### Why the penalty is v5 and not v4
 
 Supervised fine-tuning cannot punish anything. Its loss only rewards reproducing the correct
-next token, so a hallucinated phone number is never marked *wrong* — merely not reinforced.
-Penalising it needs preference training (DPO), which compares two responses to the same
-conversation and pushes probability away from the bad one.
+next token, so a phone number the brief never contained is never marked *wrong* — merely not
+reinforced. Penalising it needs preference training (DPO), which compares two responses to the
+same conversation and pushes probability away from the bad one.
 
 DPO also has to start from a model that already does the task, using it as its own reference
-point. So v2 has to exist before v3 can be trained. This is a sequence, not a choice between
+point. So v4 has to exist before v5 can be trained. This is a sequence, not a choice between
 them.
 
 Keeping them as separate versions is also the only way to know whether the penalty helped. If
-v2 already stopped inventing numbers, v3 costs training time for nothing — and you can only
-see that by comparing v2 against v3 on the same calls.
+v4 already stopped inventing details, v5 costs training time for nothing — and you can only
+see that by comparing v4 against v5 on the same calls.
+
+That matters more in the outbound role than it did in the inbound one. The agent is now the
+party *supplying* details rather than collecting them, so an invented digit goes out to a real
+business and books a real appointment against a number nobody can answer.
 
 v1 is deliberately the untouched model. It costs nothing to "have", and without it there is
-no way to tell whether v2 actually improved anything. Run it with:
+no way to tell whether v4 actually improved anything. Run it with:
 
 ```bash
 python3 training/infer.py --base-only     # this is v1
@@ -40,8 +49,10 @@ python3 training/infer.py --base-only     # this is v1
 
 | Version | Conversations | Examples | Generator | Quality gate | Status |
 |---|---|---|---|---|---|
-| **ethos-booking-v1** | 500 (target) | ~4,000 (est.) | `llama3.1:8b` @ temp 0.9 | full rule set | not generated yet |
-| **ethos-preferences-v1** | derived | ~1 pair per example | corruption of booking-v1 | n/a | not built yet |
+| **ethos-booking-v1** | 166 (of 180 requested) | 1,157 | `llama3.2:3b` @ temp 0.9 | receptionist rule set | generated, **superseded** — wrong role |
+| **ethos-preferences-v1** | derived | 1,156 pairs | corruption of booking-v1 | n/a | built, **superseded** — derived from v1 |
+| **ethos-booking-v2** | 200 (target) | ~1,400 (est.) | pinned at generation time | outbound rule set | not generated yet |
+| **ethos-preferences-v2** | derived | ~1 pair per example | corruption of booking-v2 | n/a | not built yet |
 
 `ethos-preferences-v1` is derived from `ethos-booking-v1`, not generated separately. Each pair
 shares a conversation and differs only in the assistant's response — the chosen one copies a
@@ -73,14 +84,19 @@ will be, but they stay unversioned because 12 conversations is not a dataset.
 Every generation run writes a manifest next to the data:
 
 ```bash
-python3 generation/generate_dataset.py -n 500 --dataset-version v1 -o data/ethos_booking_v1.jsonl
-# -> data/ethos_booking_v1.manifest.json
+python3 generation/generate_dataset.py -n 200 --dataset-version v2 -o data/ethos_booking_v2.jsonl
+# -> data/ethos_booking_v2.manifest.json
 ```
 
 The manifest pins everything needed to reproduce the run — generator model and temperature,
 whether the quality gate was on, the seed, SHA-256 of the data file, SHA-256 of both
-`generate_dataset.py` and `check_quality.py`, the assistant system prompt in full, and the
+`generate_dataset.py` and `check_quality.py`, the agent system prompt *template*, and the
 scenario distribution.
+
+The prompt is recorded as a template rather than a finished string because each conversation
+carries its own client brief. The filled-in version lives in every example's system message,
+which is what makes the data auditable: what the agent was told is stored next to what it
+said.
 
 The code hashes matter most. If someone changes a quality rule and regenerates, the manifest
 hash changes even when every other setting is identical — which is exactly the signal that

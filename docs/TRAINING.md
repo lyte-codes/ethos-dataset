@@ -80,15 +80,16 @@ Run the same handful of calls through both. What the fine-tune should improve:
 Eval loss alone will not tell you whether the last point improved. Check it by hand, or run
 `check_quality.py`'s rules over generated conversations.
 
-## Penalising invented details (model v3)
+## Penalising invented details (model v5)
 
 Supervised training rewards the right answer but never marks a wrong one as wrong. If the
-model states a phone number the caller never gave, SFT simply does not reinforce it — there
-is no gradient pushing against it. Preference training supplies that gradient.
+model gives the business a phone number the brief never contained, SFT simply does not
+reinforce it — there is no gradient pushing against it. Preference training supplies that
+gradient.
 
 ```bash
 python3 generation/build_preference_pairs.py \
-    --data data/ethos_booking_v1.jsonl --out data/ethos_preferences_v1.jsonl
+    --data data/ethos_booking_v2.jsonl --out data/ethos_preferences_v2.jsonl
 python3 training/train_dpo.py \
     --data data/ethos_preferences_v1.jsonl --sft-adapter checkpoints/ethos-qwen-lora
 ```
