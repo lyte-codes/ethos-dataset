@@ -13,3 +13,6 @@ smoke_test.jsonl
 verify_*.jsonl
 
 .DS_Store
+
+# handoff inbox — see NEXT.md
+NEXT.md.bak
