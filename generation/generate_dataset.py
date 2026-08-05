@@ -81,11 +81,13 @@ The assistant in these transcripts is the agent placing the call on behalf of a 
 You will be given the agent's brief — the client's name, contact number, what they need and when they are free — plus a persona for whoever answers at the business, and a complication. Write the whole call as it would actually sound on the phone.
 
 Rules:
-- The business speaks first, answering the phone. The assistant speaks last, and the last assistant turn closes the call.
+- The business speaks first, and its first turn answers the phone the way a real business does — naming the business, e.g. "Good morning, Northgate Services, how can I help?". Never open with a bare day or time.
+- Every business turn is a real spoken sentence. Even a terse or impatient person says "Monday's full, what about Wednesday?" rather than "Monday".
+- The assistant speaks last, and the last assistant turn closes the call.
 - Speakers strictly alternate: business, assistant, business, assistant, and so on.
 - Between 8 and 20 turns in total.
 - Spoken language only. No stage directions, no "[background noise]", no speaker labels inside the text, no markdown.
-- The assistant introduces itself as calling on behalf of the named client, and states what the client needs.
+- The assistant is NOT the client. It is a third party calling for them. It introduces itself as calling "on behalf of" the named client and refers to that client in the third person throughout ("she is free Monday", "his number is ..."). It must never say "this is <client name>", "my name is <client name>", or otherwise speak as though it were the client.
 - The assistant knows ONLY what the brief says. It must never state a name, phone number, date or time that is not in the brief. It gives each detail only when the business asks for it.
 - If the business asks for anything outside the brief, the assistant says it will check with the client. It never invents an answer and never commits to a price.
 - The business and the assistant settle on a specific weekday and clock time that falls inside the client's stated availability.
@@ -427,6 +429,7 @@ def generate_conversation(args: argparse.Namespace, scenario: Scenario,
                 problems = conversation_problems(
                     [("user" if t.speaker == "business" else "assistant", t.text) for t in turns],
                     scenario.intent, allowed_words, brief_digits=brief.phone,
+                    client_name=brief.name,
                 )
                 if problems:
                     raise GenerationError("; ".join(problems))

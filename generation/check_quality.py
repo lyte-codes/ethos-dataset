@@ -91,6 +91,7 @@ def known_tokens(text: str) -> set[str]:
 
 
 BRIEF_PHONE = re.compile(r"Contact number:\s*([\d\s\-()+]{7,})")
+BRIEF_NAME = re.compile(r"- Name:\s*(.+)")
 
 
 def check(examples: list[dict], business_words: set[str]) -> list[str]:
@@ -98,12 +99,30 @@ def check(examples: list[dict], business_words: set[str]) -> list[str]:
     # Standalone runs only have the file, so recover the brief from the system message the
     # generator baked into every example.
     match = BRIEF_PHONE.search(system)
+    name = BRIEF_NAME.search(system)
     return conversation_problems(turns, intent, business_words | known_tokens(system),
-                                 brief_digits=match.group(1) if match else "")
+                                 brief_digits=match.group(1) if match else "",
+                                 client_name=name.group(1).strip() if name else "")
+
+
+def impersonation(text: str, client_name: str) -> str | None:
+    """The agent calls *for* the client. Speaking as them is a role failure, not a phrasing one."""
+    if not client_name:
+        return None
+    names = [client_name] + client_name.split()
+    for name in names:
+        pattern = re.compile(
+            rf"\b(?:this is|my name is|i(?:'m| am))\s+(?:mr|mrs|ms|miss|dr)?\.?\s*{re.escape(name)}\b",
+            re.IGNORECASE,
+        )
+        match = pattern.search(text)
+        if match:
+            return match.group().strip()
+    return None
 
 
 def conversation_problems(turns: list[tuple[str, str]], intent: str, allowed_words: set[str],
-                          brief_digits: str = "") -> list[str]:
+                          brief_digits: str = "", client_name: str = "") -> list[str]:
     """Defects in an outbound call, where the assistant is the agent placing it.
 
     The assistant is the party that *supplies* details, so the rule it must not break is the
@@ -139,6 +158,9 @@ def conversation_problems(turns: list[tuple[str, str]], intent: str, allowed_wor
                 problems.append(f"assistant states digits {run.strip()!r} that are not in the brief")
         if PLACEHOLDER.search(text):
             problems.append(f"placeholder text in assistant turn: {PLACEHOLDER.search(text).group()!r}")
+        posing = impersonation(text, client_name)
+        if posing:
+            problems.append(f"assistant speaks as the client ({posing!r}) instead of on their behalf")
         seen |= known_tokens(text)
 
     assistant_text = " ".join(text for role, text in turns if role == "assistant")
@@ -147,6 +169,13 @@ def conversation_problems(turns: list[tuple[str, str]], intent: str, allowed_wor
     # The agent commits its client to nothing it was not told to commit them to.
     if PRICE.search(assistant_text):
         problems.append(f"assistant commits to a price ({PRICE.search(assistant_text).group().strip()!r})")
+
+    # An outbound call that never names its client is indistinguishable from the agent booking
+    # for itself, which is the role confusion this dataset exists to train out.
+    if client_name:
+        opening = " ".join(text for role, text in turns if role == "assistant")[:400]
+        if not any(part.lower() in opening.lower() for part in client_name.split()):
+            problems.append("assistant never says who it is calling on behalf of")
 
     if briefed_digits and intent == "new_booking" and briefed_digits not in re.sub(r"\D", "", assistant_text):
         problems.append("assistant never gives the client's contact number")
