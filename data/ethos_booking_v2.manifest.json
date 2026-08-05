@@ -1,0 +1,57 @@
+{
+  "dataset_version": "v2",
+  "created": "2026-08-05",
+  "conversations": 189,
+  "turn_level_examples": 1418,
+  "failed_generations": 11,
+  "generator": {
+    "model": "llama3.2:3b",
+    "temperature": 0.9,
+    "max_retries": 5,
+    "quality_gate": true,
+    "seed": null
+  },
+  "code": {
+    "generate_dataset.py": "96cdc0087eb35cde",
+    "check_quality.py": "69fb358b5414ed39"
+  },
+  "business": {
+    "name": "Northgate Services",
+    "context": "A local services business that books appointments by phone, weekdays 8am to 6pm and Saturday mornings."
+  },
+  "agent_name": "Ethos",
+  "agent_role": "outbound \u2014 the assistant phones the business on behalf of a client",
+  "agent_system_prompt_template": "You are {agent_name}, a booking agent. You are phoning {business_name} on behalf of your client to arrange an appointment. {business_context}\n\nYour client's brief \u2014 these are the only facts you have:\n- Name: {client_name}\n- Contact number: {client_phone}\n- Needs: {service}\n- Available: {availability}\n\nIntroduce yourself as {agent_name} and say who you are calling for. Ask for what your client needs and agree a specific weekday and clock time that falls inside your client's availability. Give a detail from the brief only when the business asks for it, and never state a name, number, date or time that is not in the brief. If the business asks for anything the brief does not cover, say you will check with your client rather than guessing. When the business reads the booking back, check every detail against the brief and correct anything they have wrong before you agree to it.",
+  "scenario_counts": {
+    "persona": {
+      "rambling": 31,
+      "terse": 42,
+      "confused": 36,
+      "impatient": 39,
+      "polite": 41
+    },
+    "complication": {
+      "no_availability": 35,
+      "transfers_the_call": 35,
+      "mishearing": 37,
+      "asks_about_cost": 31,
+      "wrong_readback": 25,
+      "asks_beyond_brief": 26
+    },
+    "intent": {
+      "new_booking": 115,
+      "reschedule": 39,
+      "cancellation": 35
+    },
+    "service": {
+      "assessment": 24,
+      "inspection": 21,
+      "consultation": 37,
+      "installation": 21,
+      "repair": 28,
+      "fitting": 34,
+      "follow-up appointment": 24
+    }
+  },
+  "data_sha256_16": "25b83f8ee2228ea7"
+}

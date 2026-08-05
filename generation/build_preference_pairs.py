@@ -89,11 +89,17 @@ CORRUPTIONS = {
 }
 
 
-def caller_said(value: str, messages: list[dict]) -> bool:
-    """Only corrupt details the caller actually supplied — those are the copies that matter."""
+def in_the_brief(value: str, messages: list[dict]) -> bool:
+    """Only corrupt a number the agent was actually given.
+
+    The agent is the party that supplies details, so the number it should be saying comes
+    from the brief in the system message — not from anything the business said. Looking on
+    the business's side is what the inbound version did, and there the number would almost
+    never appear.
+    """
     digits = re.sub(r"\D", "", value)
-    spoken = " ".join(m["content"] for m in messages if m["role"] == "user")
-    return bool(digits) and digits in re.sub(r"\D", "", spoken)
+    brief = " ".join(m["content"] for m in messages if m["role"] == "system")
+    return bool(digits) and digits in re.sub(r"\D", "", brief)
 
 
 def build_pairs(examples: list[dict], rng: random.Random, per_example: int) -> list[dict]:
@@ -102,7 +108,7 @@ def build_pairs(examples: list[dict], rng: random.Random, per_example: int) -> l
         response, messages = example["response"], example["messages"]
         phone_match = PHONE.search(response)
         applicable = []
-        if phone_match and caller_said(phone_match.group(), messages):
+        if phone_match and in_the_brief(phone_match.group(), messages):
             applicable.append("phone")
         if HOUR.search(response):
             applicable.append("time")
