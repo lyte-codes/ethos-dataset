@@ -16,8 +16,11 @@ training data. The rules that matter:
   the scrubbed version has to be wrong by one digit too. Mapping the two numbers
   independently would destroy the very relationship the correction is teaching.
 
-Numbers come from 07700 900000–900999, which Ofcom reserves for drama, so no
-generated number can ever reach a real person.
+Numbers are drawn from every range Ofcom reserves for drama — mobile, freephone,
+non-geographic and the geographic blocks for a dozen cities — so no generated number
+can ever reach a real person. Using a single range would be worse than useless: a
+model trained only on 07700 900xxx learns that phone numbers start with 07700 900,
+and then reads that prefix back on a call where the client gave something else.
 """
 
 from __future__ import annotations
@@ -28,6 +31,42 @@ import re
 PHONE = re.compile(r"(?:\d[\s\-().]*){6,}\d")
 EMAIL = re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b")
 POSTCODE = re.compile(r"\b[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}\b", re.IGNORECASE)
+
+# Every entry is inside a range Ofcom reserves for drama and never assigns, so none of
+# these can ring a real phone. Each is (prefix, how many trailing digits are free).
+# Keeping the free digits at the end is what lets a near-miss stay inside the range.
+RESERVED_RANGES = [
+    ("07700 900", 3),    # mobile
+    ("07700 9", 5),      # mobile, wider block written without the space
+    ("020 7946 0", 3),   # London
+    ("0113 496 0", 3),   # Leeds
+    ("0114 496 0", 3),   # Sheffield
+    ("0115 496 0", 3),   # Nottingham
+    ("0117 496 0", 3),   # Bristol
+    ("0118 496 0", 3),   # Reading
+    ("0121 496 0", 3),   # Birmingham
+    ("0131 496 0", 3),   # Edinburgh
+    ("0141 496 0", 3),   # Glasgow
+    ("0151 496 0", 3),   # Liverpool
+    ("0161 496 0", 3),   # Manchester
+    ("0191 498 0", 3),   # Tyneside
+    ("028 9018 0", 3),   # Northern Ireland
+    ("029 2018 0", 3),   # Cardiff
+    ("01632 960", 3),    # reserved geographic
+    ("0800 496 0", 3),   # freephone
+    ("0808 157 0", 3),   # freephone
+    ("0909 879 0", 3),   # premium rate
+    ("03069 990", 3),    # non-geographic
+]
+
+# The same number gets written down several ways on a real call, and a model shown only
+# one spacing learns that spacing as part of what a number is.
+FORMATS = [
+    lambda number: number,
+    lambda number: number.replace(" ", ""),
+    # International form drops the trunk 0 and keeps the rest of the spacing intact.
+    lambda number: ("+44 " + number[1:]) if number.startswith("0") else number,
+]
 
 FORENAMES = [
     "Marcus", "Priya", "Denise", "Alan", "Sophie", "Tomas", "Grace", "Hugh", "Nadia",
@@ -44,11 +83,14 @@ def digits_of(text: str) -> str:
 
 
 def near_miss(number: str, rng: random.Random) -> str:
-    """Same number with one digit changed — how a misheard number actually differs."""
+    """Same number with one digit changed — how a misheard number actually differs.
+
+    Only the trailing digits move. Every reserved range keeps its free digits at the
+    end, so perturbing further left would walk the number out of the drama block and
+    into one that might belong to somebody.
+    """
     positions = [i for i, character in enumerate(number) if character.isdigit()]
-    # Leave the leading 077009 alone so the result stays inside the drama range.
-    changeable = positions[-3:]
-    index = rng.choice(changeable)
+    index = rng.choice(positions[-3:])
     replacement = rng.choice([d for d in "0123456789" if d != number[index]])
     return number[:index] + replacement + number[index + 1:]
 
@@ -64,7 +106,9 @@ class Scrubber:
 
     def _fresh_number(self) -> str:
         while True:
-            candidate = f"07700 900{self.rng.randint(0, 999):03d}"
+            prefix, free = self.rng.choice(RESERVED_RANGES)
+            body = "".join(str(self.rng.randint(0, 9)) for _ in range(free))
+            candidate = self.rng.choice(FORMATS)(prefix + body)
             if candidate not in self.numbers.values():
                 return candidate
 
