@@ -146,6 +146,7 @@ awkward sentence, it is confidently stating a phone number nobody gave it.
 | Gate | nightly | beta | stable |
 |---|---|---|---|
 | Invented caller detail (phone, name, date, time) on the regression set | 0 | 0 | 0 |
+| No regression against the current `stable` on any blocking metric | — | required | required |
 | Booking completed within the turn budget | ≥ 80% | ≥ 90% | ≥ 90% |
 | Business's readback correctly verified or corrected | ≥ 70% | ≥ 85% | ≥ 85% |
 | Never quotes a price it was not given | pass | pass | pass |
@@ -156,9 +157,39 @@ Invented details are a **hard zero at every level**, including nightly. That is 
 reason the preference-training stage exists, and a build that regresses on it should never
 reach a channel anyone can resolve.
 
-The regression set is a frozen list of scripted calls with known-correct answers, kept
-separate from the training data and never regenerated — if it drifts, the numbers stop being
-comparable across releases, which defeats the point.
+### Two ways to fail
+
+The table above is all absolute floors, and floors alone are not enough. A candidate can clear
+every one of them and still be worse than the build it would replace — shipping it is a
+downgrade for everyone already on `stable`, whatever the numbers say in isolation.
+
+So a build fails if **either** is true:
+
+1. **It misses a floor.** Non-negotiable, and independent of history. Without floors a series of
+   releases each "no worse than the last" can drift a long way down, one imperceptible step at a
+   time, with nothing ever failing.
+2. **It regresses against the current `stable`.** Measured on the same frozen call set, a
+   candidate must not be worse on any blocking metric. Better on one axis does not buy a
+   regression on another — a build that completes more bookings but invents more details is not
+   a trade worth making, it is the failure mode wearing a disguise.
+
+The relative check needs a baseline, so it does not apply to the first release of a line. `0.1`
+has no predecessor and is judged on floors alone. The same is true immediately after a MAJOR
+bump: the agent's behaviour deliberately changed, so comparing it to the previous major would
+be measuring the intended change rather than a regression. Re-baseline at the new `x.0` and
+compare within the line after that.
+
+### Why the comparison has to be paired
+
+Both checks are worthless if the numbers move on their own. The regression set is a frozen list
+of scripted calls with known-correct answers, kept out of the training data and never
+regenerated — if it drifts, results stop being comparable across releases and every
+"regression" is arguable.
+
+Evaluation runs at temperature 0 for the same reason. Sampling noise on a few dozen calls is
+easily larger than the difference you are trying to detect, and a gate that fires on noise gets
+ignored within a week. Same calls, same decoding, so a difference between two builds is the
+builds differing.
 
 ---
 
