@@ -9,8 +9,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
+
+# transformers pulls in its TensorFlow integration on import, which fails against
+# Keras 3. Nothing here uses TF.
+os.environ.setdefault("USE_TF", "0")
+os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
 
 import torch
 from datasets import Dataset
@@ -141,9 +147,11 @@ def main() -> int:
         tokenize, remove_columns=Dataset.from_list(eval_examples).column_names
     )
 
+    # bf16 only pays off on CUDA. MPS trains more reliably in fp32, and a 1.5B model
+    # in fp32 still fits comfortably in unified memory.
     model = AutoModelForCausalLM.from_pretrained(
         args.base_model,
-        torch_dtype=torch.bfloat16 if device != "cpu" else torch.float32,
+        dtype=torch.bfloat16 if device == "cuda" else torch.float32,
     )
     model.config.use_cache = False
 
@@ -157,6 +165,11 @@ def main() -> int:
     )
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
+    # Recompute activations during backward instead of storing all of them. On a
+    # 16GB unified-memory machine, storing full activations for a 1.5B model at
+    # seq_len=1024 swaps hard enough to make training impractically slow.
+    model.enable_input_require_grads()
+    model.gradient_checkpointing_enable()
 
     training_arguments = TrainingArguments(
         output_dir=str(args.output),
@@ -168,10 +181,16 @@ def main() -> int:
         warmup_ratio=hyperparameters.warmup_ratio,
         weight_decay=hyperparameters.weight_decay,
         logging_steps=10,
-        eval_strategy="epoch" if eval_examples else "no",
-        save_strategy="epoch",
+        # Eval forwards full-vocab logits (152k) on top of memory the training loop
+        # hasn't released yet — on this 16GB MPS machine that tips it over the cap
+        # right at the epoch boundary. Skip in-loop eval here; run it separately
+        # against the saved checkpoint instead.
+        eval_strategy="epoch" if (eval_examples and device != "mps") else "no",
+        save_strategy="steps",
+        save_steps=50,
         save_total_limit=2,
         bf16=(device == "cuda"),
+        gradient_checkpointing=True,
         seed=args.seed,
         report_to=[],
     )

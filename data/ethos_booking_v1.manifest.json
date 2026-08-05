@@ -1,0 +1,55 @@
+{
+  "dataset_version": "v1",
+  "created": "2026-08-04",
+  "conversations": 166,
+  "turn_level_examples": 1157,
+  "failed_generations": 14,
+  "generator": {
+    "model": "llama3.2:3b",
+    "temperature": 0.9,
+    "max_retries": 5,
+    "quality_gate": true,
+    "seed": null
+  },
+  "code": {
+    "generate_dataset.py": "a4c26b6a190f96c5",
+    "check_quality.py": "edeff05f096abe4c"
+  },
+  "business": {
+    "name": "Northgate Services",
+    "context": "A local services business that books appointments by phone, weekdays 8am to 6pm and Saturday mornings."
+  },
+  "assistant_system_prompt": "You are a phone booking assistant for Northgate Services. A local services business that books appointments by phone, weekdays 8am to 6pm and Saturday mornings.\nBe concise, confirm details clearly, and ask one question at a time. Collect the service type, the date and time, the duration when it is relevant, and the caller's name and phone number. Read the booking back to the caller before confirming it.",
+  "scenario_counts": {
+    "persona": {
+      "rambling": 36,
+      "terse": 37,
+      "polite": 47,
+      "impatient": 33,
+      "confused": 27
+    },
+    "complication": {
+      "mishearing": 28,
+      "multiple_bookings": 39,
+      "asks_before_committing": 26,
+      "vague_time": 30,
+      "change_of_mind": 32,
+      "corrects_info": 25
+    },
+    "intent": {
+      "new_booking": 109,
+      "reschedule": 34,
+      "cancellation": 37
+    },
+    "service": {
+      "assessment": 33,
+      "consultation": 25,
+      "fitting": 17,
+      "follow-up appointment": 24,
+      "inspection": 21,
+      "installation": 30,
+      "repair": 30
+    }
+  },
+  "data_sha256_16": "863a3ea9ae1b1d8d"
+}
