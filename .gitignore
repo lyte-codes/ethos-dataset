@@ -12,6 +12,11 @@ checkpoints/
 smoke_test.jsonl
 verify_*.jsonl
 
+# Rendered call audio and the transcripts beside it. Regenerable from the call
+# JSON, and an MP3 per call would bloat the history fast.
+data/audio/
+data/fake_calls.json
+
 .DS_Store
 
 # handoff inbox — see NEXT.md

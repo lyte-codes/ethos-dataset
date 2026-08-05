@@ -19,8 +19,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-CALLER_VOICE = "Samantha"
-ASSISTANT_VOICE = "Daniel"
+BUSINESS_VOICE = "Daniel"     # whoever picks up at the business
+AGENT_VOICE = "Samantha"      # the booking agent placing the call
 GAP_SECONDS = 0.45
 
 
@@ -59,7 +59,7 @@ def silence(seconds: float, destination: Path) -> None:
     )
 
 
-def render(call: dict, out_path: Path, caller_voice: str, assistant_voice: str,
+def render(call: dict, out_path: Path, business_voice: str, agent_voice: str,
            rate: int, gap: float) -> Path:
     require("say")
     require("ffmpeg")
@@ -75,7 +75,7 @@ def render(call: dict, out_path: Path, caller_voice: str, assistant_voice: str,
             if not turn["text"].strip():
                 continue
             clip = work / f"{index:03d}.wav"
-            voice = caller_voice if turn["role"] == "caller" else assistant_voice
+            voice = business_voice if turn["role"] == "business" else agent_voice
             synthesise(turn["text"], voice, rate, clip)
             clips.append(clip)
             clips.append(pause)
@@ -98,12 +98,14 @@ def render(call: dict, out_path: Path, caller_voice: str, assistant_voice: str,
 
 
 def transcript_text(call: dict) -> str:
-    lines = [f"# Fake call — {call['caller']['name']} ({call['caller']['persona']})",
-             f"# assistant: {call.get('assistant_model', 'unknown')}",
-             f"# wants: {call['caller']['service']}, {call['caller']['when']}",
-             f"# phone:  {call['caller']['phone']}", ""]
+    brief = call["brief"]
+    lines = [f"# Fake outbound call — agent booking for {brief['client_name']}",
+             f"# agent model: {call.get('agent_model', 'unknown')}",
+             f"# brief: {brief['service']}, available {brief['availability']}",
+             f"# client number: {brief['client_phone']}",
+             f"# business persona: {call.get('persona', '?')}", ""]
     for turn in call["turns"]:
-        speaker = "CALLER   " if turn["role"] == "caller" else "ASSISTANT"
+        speaker = "BUSINESS " if turn["role"] == "business" else "AGENT    "
         lines.append(f"{speaker}  {turn['text']}")
     if "audit" in call:
         lines += ["", "# audit"]
@@ -119,8 +121,8 @@ def main() -> int:
     parser.add_argument("--index", type=int, default=0, help="which call to render")
     parser.add_argument("--all", action="store_true", help="render every call in the file")
     parser.add_argument("--out-dir", type=Path, default=Path("data/audio"))
-    parser.add_argument("--caller-voice", default=CALLER_VOICE)
-    parser.add_argument("--assistant-voice", default=ASSISTANT_VOICE)
+    parser.add_argument("--business-voice", default=BUSINESS_VOICE)
+    parser.add_argument("--agent-voice", default=AGENT_VOICE)
     parser.add_argument("--rate", type=int, default=180, help="words per minute")
     parser.add_argument("--gap", type=float, default=GAP_SECONDS)
     args = parser.parse_args()
@@ -129,11 +131,11 @@ def main() -> int:
     calls = payload["calls"] if isinstance(payload, dict) else payload
     chosen = list(enumerate(calls)) if args.all else [(args.index, calls[args.index])]
 
-    tag = re.sub(r"[^a-z0-9]+", "-", str(payload.get("assistant_model", "model")).lower()).strip("-")
+    tag = re.sub(r"[^a-z0-9]+", "-", str(payload.get("agent_model", "model")).lower()).strip("-")
     for index, call in chosen:
-        stem = f"{tag}-call{index + 1}-{call['caller']['name'].split()[-1].lower()}"
+        stem = f"{tag}-call{index + 1}-{call['brief']['client_name'].split()[-1].lower()}"
         audio = render(call, args.out_dir / f"{stem}.mp3",
-                       args.caller_voice, args.assistant_voice, args.rate, args.gap)
+                       args.business_voice, args.agent_voice, args.rate, args.gap)
         (args.out_dir / f"{stem}.txt").write_text(transcript_text(call))
         size = audio.stat().st_size / 1024
         print(f"{audio}  ({size:.0f} KB)")
