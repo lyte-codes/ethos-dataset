@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "progress",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["training/progress_server.py", "--port", "8777"],
+      "port": 8777
+    }
+  ]
+}

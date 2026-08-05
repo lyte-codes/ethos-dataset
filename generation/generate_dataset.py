@@ -32,78 +32,98 @@ SERVICE_TYPES = [
 
 PERSONAS = {
     "terse": "Answers in as few words as possible. Often one or two words. Never volunteers information that was not asked for.",
-    "rambling": "Talks around the point, drifts into unrelated detail about their week, and buries the actual answer inside a long sentence.",
-    "polite": "Warm and cooperative, thanks the assistant often, apologises for taking up time, answers clearly.",
-    "impatient": "In a hurry, wants this over with, pushes back on being asked for details, interrupts with 'can we just get it booked'.",
-    "confused": "Unsure what they actually need, mixes up dates and days of the week, asks the assistant to repeat things.",
+    "rambling": "Talks around the point, drifts into unrelated detail about the shop's week, and buries the actual answer inside a long sentence.",
+    "polite": "Warm and helpful, thanks the agent often, apologises for any delay, answers clearly.",
+    "impatient": "Busy and short on time, pushes to get the call over with, interrupts with 'what day do you want'.",
+    "confused": "New to the desk, unsure what the diary shows, mixes up days of the week, asks the agent to repeat things.",
 }
 
 COMPLICATIONS = {
-    "vague_time": "The caller first gives a vague time reference such as 'sometime next week' or 'end of the month' and the assistant has to narrow it down to a specific day and time.",
-    "change_of_mind": "Partway through the call the caller changes their mind about the day, the time, or the service, and the assistant has to update what it already collected.",
-    "asks_before_committing": "Before agreeing to anything the caller asks about availability, how long it takes, or roughly what it costs. The assistant answers plausibly but does not invent exact prices, and steers back to booking.",
-    "corrects_info": "The caller gives a detail (a phone number, a name spelling, a date) and then corrects it a few turns later. The assistant has to acknowledge the correction and use the new value.",
-    "multiple_bookings": "The caller books two separate things in one call, and the assistant keeps them distinct and confirms both at the end.",
-    "mishearing": "There is background noise on the line. The assistant mishears or cannot catch a detail once, asks the caller to repeat or spell it, and then continues.",
+    "no_availability": "The first day or time the agent asks for is not free. The business offers alternatives and the agent has to pick one that fits the client's stated availability, or say it will check back with the client.",
+    "asks_beyond_brief": "The business asks for something the brief does not cover — an account number, an access code, whether there is parking. The agent must say it will check with the client rather than answer.",
+    "wrong_readback": "When the business reads the booking back, it gets one detail wrong — a digit of the phone number, the weekday, or the time. The agent notices and corrects it before agreeing.",
+    "transfers_the_call": "The first person cannot book and passes the agent to someone who can. The agent restates the request concisely to the second person without changing any detail.",
+    "asks_about_cost": "The business mentions a call-out charge or asks whether the client has approved a cost. The agent does not commit to a price and says it will confirm with the client.",
+    "mishearing": "There is background noise on the line. The business mishears a detail once and the agent repeats or spells it out, using only what the brief says.",
 }
 
 CALL_INTENTS = {
-    "new_booking": "The caller wants to book a new appointment.",
-    "reschedule": "The caller already has an appointment and wants to move it to a different day or time. They give their name and roughly when the existing appointment is.",
-    "cancellation": "The caller wants to cancel an existing appointment. The assistant confirms which appointment, cancels it, and offers to rebook.",
+    "new_booking": "The agent is calling to book a new appointment for the client.",
+    "reschedule": "The client already has an appointment and the agent is calling to move it to a different day or time.",
+    "cancellation": "The agent is calling to cancel the client's existing appointment, and to rebook only if the brief says to.",
 }
 
 INTENT_WEIGHTS = {"new_booking": 0.65, "reschedule": 0.2, "cancellation": 0.15}
 
-ASSISTANT_SYSTEM_PROMPT = (
-    "You are a phone booking assistant for {business_name}. {business_context}\n"
-    "Be concise, confirm details clearly, and ask one question at a time. "
-    "Collect the service type, the date and time, the duration when it is relevant, "
-    "and the caller's name and phone number. "
-    "Read the booking back to the caller before confirming it."
+AGENT_SYSTEM_PROMPT = (
+    "You are a booking agent. You are phoning {business_name} on behalf of your client to "
+    "arrange an appointment. {business_context}\n"
+    "\n"
+    "Your client's brief — these are the only facts you have:\n"
+    "- Name: {client_name}\n"
+    "- Contact number: {client_phone}\n"
+    "- Needs: {service}\n"
+    "- Available: {availability}\n"
+    "\n"
+    "Say who you are and who you are calling for. Ask for what your client needs and agree a "
+    "specific weekday and clock time that falls inside your client's availability. Give a "
+    "detail from the brief only when the business asks for it, and never state a name, number, "
+    "date or time that is not in the brief. If the business asks for anything the brief does "
+    "not cover, say you will check with your client rather than guessing. When the business "
+    "reads the booking back, check every detail against the brief and correct anything they "
+    "have wrong before you agree to it."
 )
 
-GENERATOR_SYSTEM_PROMPT = """You write realistic transcripts of phone calls to a small business's booking line.
+GENERATOR_SYSTEM_PROMPT = """You write realistic transcripts of phone calls made BY a booking agent TO a small business.
 
-You will be given a scenario: a caller persona, a complication, a service, and what the caller is calling about. Write the whole call as it would actually sound on the phone.
+The assistant in these transcripts is the agent placing the call on behalf of a client. It is not the business. The business is the other speaker, and it is the one that answers the phone, checks the diary and reads the booking back.
+
+You will be given the agent's brief — the client's name, contact number, what they need and when they are free — plus a persona for whoever answers at the business, and a complication. Write the whole call as it would actually sound on the phone.
 
 Rules:
-- The caller speaks first. The assistant speaks last, and the last assistant turn confirms the outcome of the call.
-- Speakers strictly alternate: caller, assistant, caller, assistant, and so on.
+- The business speaks first, answering the phone. The assistant speaks last, and the last assistant turn closes the call.
+- Speakers strictly alternate: business, assistant, business, assistant, and so on.
 - Between 8 and 20 turns in total.
 - Spoken language only. No stage directions, no "[background noise]", no speaker labels inside the text, no markdown.
-- The assistant is concise, asks one question at a time, and confirms details back to the caller.
-- The assistant knows nothing about the caller at the start of the call. It must never use a detail the caller has not already said out loud. In particular it must not use the caller's name, or any honorific such as Mr or Ms, until the caller has given their name. Before that point the assistant addresses the caller with no name at all.
-- The assistant must ask for a callback phone number, and the caller must speak that number out loud in a caller turn before the assistant ever repeats it back. The assistant must never state a phone number, a name, a date or a time that the caller has not already said. The assistant must also collect the caller's name, the service, and a specific day and clock time.
-- The final assistant turn reads the whole booking back: service, weekday and date, clock time, caller name, phone number.
+- The assistant introduces itself as calling on behalf of the named client, and states what the client needs.
+- The assistant knows ONLY what the brief says. It must never state a name, phone number, date or time that is not in the brief. It gives each detail only when the business asks for it.
+- If the business asks for anything outside the brief, the assistant says it will check with the client. It never invents an answer and never commits to a price.
+- The business and the assistant settle on a specific weekday and clock time that falls inside the client's stated availability.
+- The business reads the booking back near the end. The assistant checks it against the brief and explicitly corrects any detail the business got wrong.
 - Use real-sounding specifics. Never write a placeholder such as [name], [date] or XXX-XXXX.
-- The persona shapes the caller's turns, not the assistant's. The assistant stays professional throughout.
+- The persona shapes the business's turns, not the assistant's. The assistant stays professional throughout.
 
 Reply with JSON only, in exactly this shape:
-{"turns": [{"speaker": "caller", "text": "..."}, {"speaker": "assistant", "text": "..."}]}"""
+{"turns": [{"speaker": "business", "text": "..."}, {"speaker": "assistant", "text": "..."}]}"""
 
-GENERATOR_USER_PROMPT = """Business: {business_name}
+GENERATOR_USER_PROMPT = """Business being called: {business_name}
 Context: {business_context}
-Service: {service}
+
+The agent's brief:
+- Client name: {client_name}
+- Client contact number: {client_phone}
+- Needs: {service}
+- Client is available: {availability}
+
 Call type: {intent_description}
-Caller persona ({persona}): {persona_description}
+Persona of whoever answers at the business ({persona}): {persona_description}
 Complication: {complication_description}
 
 {checklist}
 Write the full call as JSON."""
 
 BOOKING_CHECKLIST = """Before you finish, check the call contains all of these:
-1. the caller says a phone number out loud, as digits, in a caller turn
-2. the caller and assistant settle on a specific weekday and a clock time
-3. the caller gives their name
-4. the last assistant turn reads back the service, the weekday, the clock time, the name and the phone number
-5. the assistant never states a name, number, day or time before the caller has said it
+1. the assistant says who it is calling on behalf of, using the client name from the brief
+2. the assistant speaks the client's contact number out loud, as digits, only after the business asks for it
+3. the business and the assistant settle on a specific weekday and a clock time inside the client's availability
+4. the business reads the booking back, and the assistant confirms or corrects it against the brief
+5. the assistant never states a name, number, day or time that is not in the brief
 """
 
 CANCELLATION_CHECKLIST = """Before you finish, check the call contains all of these:
-1. the caller gives their name and enough detail to identify the existing appointment
-2. the assistant confirms the cancellation explicitly
-3. the assistant never states a name, number, day or time before the caller has said it
+1. the assistant identifies the client by the name in the brief and gives enough detail to find the appointment
+2. the business confirms the cancellation explicitly
+3. the assistant never states a name, number, day or time that is not in the brief
 """
 
 BAR_WIDTH = 24
@@ -113,18 +133,24 @@ MIN_TURNS_TERSE = 6
 MAX_TURNS = 40
 MAX_TURN_CHARS = 800
 
+# The agent places the call, so it is the assistant; whoever picks up at the business is the
+# other speaker. "caller" is deliberately mapped to the business — a generator that slips back
+# into the old framing labels the phone-answering turn "caller", and that is still the business.
 SPEAKER_ALIASES = {
-    "caller": "caller",
-    "customer": "caller",
-    "user": "caller",
-    "client": "caller",
+    "business": "business",
+    "receptionist": "business",
+    "staff": "business",
+    "shop": "business",
+    "caller": "business",
+    "user": "business",
     "assistant": "assistant",
     "agent": "assistant",
-    "receptionist": "assistant",
-    "booking assistant": "assistant",
+    "booking agent": "assistant",
 }
 
-LABEL_PREFIX = re.compile(r"^\s*(caller|customer|user|assistant|agent|receptionist)\s*:\s*", re.IGNORECASE)
+LABEL_PREFIX = re.compile(
+    r"^\s*(business|receptionist|staff|shop|caller|user|assistant|agent)\s*:\s*", re.IGNORECASE
+)
 SALVAGE_TURN = re.compile(
     r'"(?:speaker|role)"\s*:\s*"([^"]+)"\s*,\s*"(?:text|content|message)"\s*:\s*"((?:[^"\\]|\\.)*)"'
 )
@@ -134,18 +160,48 @@ class GenerationError(Exception):
     """Raised when a generation cannot be turned into a usable conversation."""
 
 
+CLIENT_NAMES = [
+    "Marcus Whitfield", "Priya Raman", "Denise Okoro", "Alan Beattie", "Sophie Lindqvist",
+    "Tomas Nowak", "Grace Adeyemi", "Hugh Fairbairn", "Nadia Haddad", "Ruth Kelleher",
+    "Callum Doherty", "Yusuf Demir", "Eleanor Pryce", "Samir Chaudhry", "Bridget Moloney",
+]
+
+AVAILABILITY = [
+    "Tuesday or Wednesday morning",
+    "any weekday afternoon after two",
+    "Thursday or Friday, before midday",
+    "Saturday morning only",
+    "Monday afternoon, or Wednesday any time",
+    "weekday mornings, not Tuesday",
+]
+
+
+@dataclass(frozen=True)
+class ClientBrief:
+    """What the agent knows before it dials — and the only thing it may say out loud."""
+    name: str
+    phone: str
+    availability: str
+
+
 @dataclass(frozen=True)
 class Scenario:
     service: str
     persona: str
     complication: str
     intent: str
+    client: ClientBrief
 
 
 @dataclass(frozen=True)
 class Turn:
     speaker: str
     text: str
+
+
+def sample_phone(rng: random.Random) -> str:
+    """Ofcom reserves 07700 900000-900999 for drama, so these can never be a real number."""
+    return f"07700 900{rng.randint(0, 999):03d}"
 
 
 def sample_scenario(rng: random.Random) -> Scenario:
@@ -155,6 +211,22 @@ def sample_scenario(rng: random.Random) -> Scenario:
         persona=rng.choice(list(PERSONAS)),
         complication=rng.choice(list(COMPLICATIONS)),
         intent=rng.choices(intents, weights=[INTENT_WEIGHTS[i] for i in intents])[0],
+        client=ClientBrief(
+            name=rng.choice(CLIENT_NAMES),
+            phone=sample_phone(rng),
+            availability=rng.choice(AVAILABILITY),
+        ),
+    )
+
+
+def agent_system_prompt(business_name: str, business_context: str, scenario: Scenario) -> str:
+    return AGENT_SYSTEM_PROMPT.format(
+        business_name=business_name,
+        business_context=business_context,
+        client_name=scenario.client.name,
+        client_phone=scenario.client.phone,
+        service=scenario.service,
+        availability=scenario.client.availability,
     )
 
 
@@ -170,7 +242,7 @@ def conversation_schema(min_turns: int, max_turns: int) -> dict:
                 "items": {
                     "type": "object",
                     "properties": {
-                        "speaker": {"type": "string", "enum": ["caller", "assistant"]},
+                        "speaker": {"type": "string", "enum": ["business", "assistant"]},
                         "text": {"type": "string"},
                     },
                     "required": ["speaker", "text"],
@@ -197,6 +269,9 @@ def call_ollama(base_url: str, model: str, temperature: float, timeout: int, sce
                 "content": GENERATOR_USER_PROMPT.format(
                     business_name=business_name,
                     business_context=business_context,
+                    client_name=scenario.client.name,
+                    client_phone=scenario.client.phone,
+                    availability=scenario.client.availability,
                     service=scenario.service,
                     intent_description=CALL_INTENTS[scenario.intent],
                     persona=scenario.persona,
@@ -262,7 +337,7 @@ def repair_turns(turns: list[Turn]) -> list[Turn]:
             merged[-1] = Turn(turn.speaker, f"{merged[-1].text} {turn.text}")
         else:
             merged.append(turn)
-    while merged and merged[0].speaker != "caller":
+    while merged and merged[0].speaker != "business":
         merged.pop(0)
     while merged and merged[-1].speaker != "assistant":
         merged.pop()
@@ -301,8 +376,8 @@ def parse_conversation(raw: str, min_turns: int = MIN_TURNS) -> list[Turn]:
 
     if not min_turns <= len(turns) <= MAX_TURNS:
         raise GenerationError(f"turn count out of range ({len(turns)})")
-    if turns[0].speaker != "caller":
-        raise GenerationError("conversation does not start with the caller")
+    if turns[0].speaker != "business":
+        raise GenerationError("conversation does not start with the business")
     if turns[-1].speaker != "assistant":
         raise GenerationError("conversation does not end with the assistant")
     for earlier, later in zip(turns, turns[1:]):
@@ -315,7 +390,7 @@ def build_examples(turns: list[Turn], system_prompt: str, scenario: Scenario, co
     examples = []
     history: list[dict] = [{"role": "system", "content": system_prompt}]
     for turn in turns:
-        if turn.speaker == "caller":
+        if turn.speaker == "business":
             history.append({"role": "user", "content": turn.text})
             continue
         examples.append({
@@ -332,7 +407,11 @@ def build_examples(turns: list[Turn], system_prompt: str, scenario: Scenario, co
 
 
 def generate_conversation(args: argparse.Namespace, scenario: Scenario,
-                          allowed_words: set[str]) -> tuple[list[Turn], list[str]]:
+                          business_words: set[str]) -> tuple[list[Turn], list[str]]:
+    # The brief is per-conversation, so what the agent is allowed to say is too: the client's
+    # own name is legitimate for it to speak, and any other name is an invention.
+    brief = scenario.client
+    allowed_words = business_words | known_tokens(brief.name)
     errors = []
     for attempt in range(1, args.max_retries + 1):
         try:
@@ -346,8 +425,8 @@ def generate_conversation(args: argparse.Namespace, scenario: Scenario,
             turns = parse_conversation(raw, min_turns)
             if not args.no_quality_gate:
                 problems = conversation_problems(
-                    [("user" if t.speaker == "caller" else "assistant", t.text) for t in turns],
-                    scenario.intent, allowed_words,
+                    [("user" if t.speaker == "business" else "assistant", t.text) for t in turns],
+                    scenario.intent, allowed_words, brief_digits=brief.phone,
                 )
                 if problems:
                     raise GenerationError("; ".join(problems))
@@ -364,7 +443,7 @@ def file_digest(path: Path) -> str:
 
 
 def write_manifest(args: argparse.Namespace, generated: int, examples: int, failed: int,
-                   scenarios: dict[int, Scenario], system_prompt: str) -> Path:
+                   scenarios: dict[int, Scenario]) -> Path:
     """Record exactly what produced this file, so a dataset version is reproducible."""
     here = Path(__file__).resolve().parent
     counts = {
@@ -389,7 +468,10 @@ def write_manifest(args: argparse.Namespace, generated: int, examples: int, fail
             "check_quality.py": file_digest(here / "check_quality.py"),
         },
         "business": {"name": args.business_name, "context": args.business_context},
-        "assistant_system_prompt": system_prompt,
+        "agent_role": "outbound — the assistant phones the business on behalf of a client",
+        # The brief differs per conversation, so the template is what identifies the dataset;
+        # the filled-in version lives in each example's system message.
+        "agent_system_prompt_template": AGENT_SYSTEM_PROMPT,
         "scenario_counts": counts,
         "data_sha256_16": file_digest(args.out) if args.out.exists() else None,
     }
@@ -458,11 +540,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     rng = random.Random(args.seed)
-    system_prompt = ASSISTANT_SYSTEM_PROMPT.format(
-        business_name=args.business_name, business_context=args.business_context
-    )
-
-    allowed_words = known_tokens(system_prompt) | known_tokens(args.business_name)
+    # Every conversation gets its own system prompt because the brief differs per call.
+    business_words = known_tokens(args.business_name) | known_tokens(args.business_context)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     failure_path = args.out.with_suffix(args.out.suffix + ".failures.log")
@@ -493,7 +572,7 @@ def main() -> int:
     with args.out.open(mode, encoding="utf-8") as out_file, \
             ThreadPoolExecutor(max_workers=args.workers) as pool:
         futures = {
-            pool.submit(generate_conversation, args, scenario, allowed_words): (index, scenario)
+            pool.submit(generate_conversation, args, scenario, business_words): (index, scenario)
             for index, scenario in pending
         }
         for future in as_completed(futures):
@@ -507,6 +586,8 @@ def main() -> int:
                 print(f"  skipped {index}/{args.count} ({scenario.persona}/{scenario.complication}): {exc}",
                       file=sys.stderr, flush=True)
             else:
+                system_prompt = agent_system_prompt(
+                    args.business_name, args.business_context, scenario)
                 for example in build_examples(turns, system_prompt, scenario, index):
                     out_file.write(json.dumps(example, ensure_ascii=False) + "\n")
                     example_count += 1
@@ -531,8 +612,7 @@ def main() -> int:
                     "error": message,
                 }) + "\n")
 
-    manifest_path = write_manifest(args, generated, example_count, len(failures),
-                                   scenarios, system_prompt)
+    manifest_path = write_manifest(args, generated, example_count, len(failures), scenarios)
 
     elapsed = time.time() - started
     print("\n--- summary ---")

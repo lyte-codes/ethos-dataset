@@ -17,7 +17,16 @@ CLOCK = re.compile(
     re.IGNORECASE,
 )
 DIGIT_RUN = re.compile(r"\d[\d\s\-().]{5,}\d")
-PRICE = re.compile(r"[$£€]\s?\d+|\b\d+\s?(?:dollars|pounds|euros)\b", re.IGNORECASE)
+NUMBER_WORD = (
+    r"(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|"
+    r"thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred)"
+)
+# Spelled-out amounts count: an agent that says "about forty pounds" has committed its client
+# to a price just as surely as one that says "£40".
+PRICE = re.compile(
+    rf"[$£€]\s?\d+|\b(?:\d+|{NUMBER_WORD}(?:[\s-]{NUMBER_WORD})*)\s?(?:dollars|pounds|euros|quid)\b",
+    re.IGNORECASE,
+)
 HOUR = re.compile(r"\b(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm|a\.m\.|p\.m\.|o'?\s?clock)", re.IGNORECASE)
 WEEKDAY = re.compile(r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", re.IGNORECASE)
 
@@ -81,64 +90,77 @@ def known_tokens(text: str) -> set[str]:
     return {normalize(token) for token in CAPITALIZED.findall(text)}
 
 
+BRIEF_PHONE = re.compile(r"Contact number:\s*([\d\s\-()+]{7,})")
+
+
 def check(examples: list[dict], business_words: set[str]) -> list[str]:
-    turns, _, intent = rebuild(examples)
-    return conversation_problems(turns, intent, business_words)
+    turns, system, intent = rebuild(examples)
+    # Standalone runs only have the file, so recover the brief from the system message the
+    # generator baked into every example.
+    match = BRIEF_PHONE.search(system)
+    return conversation_problems(turns, intent, business_words | known_tokens(system),
+                                 brief_digits=match.group(1) if match else "")
 
 
-def conversation_problems(turns: list[tuple[str, str]], intent: str, business_words: set[str]) -> list[str]:
+def conversation_problems(turns: list[tuple[str, str]], intent: str, allowed_words: set[str],
+                          brief_digits: str = "") -> list[str]:
+    """Defects in an outbound call, where the assistant is the agent placing it.
+
+    The assistant is the party that *supplies* details, so the rule it must not break is the
+    mirror of the inbound one: it may say what the brief gave it and what the business has
+    already said, and nothing else. `allowed_words` carries the brief's proper nouns and
+    `brief_digits` the client's number.
+    """
     problems = []
-    seen = {normalize(word) for word in COMMON_WORDS | business_words}
-    caller_text = " ".join(t for role, t in turns if role == "user")
+    seen = {normalize(word) for word in COMMON_WORDS | allowed_words}
+    briefed_digits = re.sub(r"\D", "", brief_digits)
 
-    caller_so_far = ""
+    business_so_far = ""
     for role, text in turns:
         if role == "user":
             seen |= known_tokens(text)
-            caller_so_far += " " + text
+            business_so_far += " " + text
             continue
 
         opener = {normalize(m) for m in SENTENCE_START.findall(text)}
         for token in known_tokens(text):
             if token not in seen and token not in opener:
-                problems.append(f"assistant says {token!r} before the caller does")
+                problems.append(f"assistant says {token!r}, which is not in the brief")
         for match in HONORIFIC.finditer(text):
             surname = normalize(match.group(1)) if match.group(1) else None
             if surname and surname not in seen:
-                problems.append(f"assistant uses honorific for unstated name {surname!r}")
+                problems.append(f"assistant uses honorific for a name not in the brief {surname!r}")
             elif not surname:
                 problems.append("assistant uses a bare honorific")
         for run in DIGIT_RUN.findall(text):
             digits = re.sub(r"\D", "", run)
-            if digits not in re.sub(r"\D", "", caller_so_far):
-                problems.append(f"assistant states digits {run.strip()!r} the caller never gave")
+            known = re.sub(r"\D", "", business_so_far) + briefed_digits
+            if digits not in known:
+                problems.append(f"assistant states digits {run.strip()!r} that are not in the brief")
         if PLACEHOLDER.search(text):
             problems.append(f"placeholder text in assistant turn: {PLACEHOLDER.search(text).group()!r}")
         seen |= known_tokens(text)
 
-    first_caller_turn = next((text for role, text in turns if role == "user"), "")
-    if PHONE.search(first_caller_turn):
-        problems.append("caller opens the call with a phone number")
-    for role, text in turns:
-        if role == "assistant" and PRICE.search(text):
-            problems.append(f"assistant quotes a specific price ({PRICE.search(text).group().strip()!r})")
-            break
+    assistant_text = " ".join(text for role, text in turns if role == "assistant")
+    business_text = " ".join(text for role, text in turns if role == "user")
 
-    if intent == "new_booking" and not PHONE.search(caller_text):
-        problems.append("no phone number given by the caller")
+    # The agent commits its client to nothing it was not told to commit them to.
+    if PRICE.search(assistant_text):
+        problems.append(f"assistant commits to a price ({PRICE.search(assistant_text).group().strip()!r})")
+
+    if briefed_digits and intent == "new_booking" and briefed_digits not in re.sub(r"\D", "", assistant_text):
+        problems.append("assistant never gives the client's contact number")
     if intent != "cancellation" and not CLOCK.search(" ".join(t for _, t in turns)):
         problems.append("no clock time anywhere in the call")
 
+    # The business is the one that reads the booking back, so the confirmation should appear
+    # on its side of the call rather than the agent's.
+    if intent != "cancellation" and not CLOCK.search(business_text[-600:]):
+        problems.append("business never reads a time back near the end of the call")
+
     closing = " ".join(text for role, text in turns if role == "assistant")[-400:]
     if intent != "cancellation" and not CLOCK.search(closing):
-        problems.append("no time read back near the end of the call")
-
-    readback = turns[-1][1]
-    earlier = " ".join(text for _, text in turns[:-1])
-    for invented in sorted(hours_match(readback, earlier)):
-        problems.append(f"readback books a time never discussed ({invented.replace(':', ' ')})")
-    for day in {d.lower() for d in WEEKDAY.findall(readback)} - {d.lower() for d in WEEKDAY.findall(earlier)}:
-        problems.append(f"readback books {day.title()}, never discussed")
+        problems.append("assistant never confirms a time near the end of the call")
 
     return sorted(set(problems))
 

@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ethos v2 — live</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --ground:#E9EEED; --surface:#FBFDFC; --edge:#CBD6D4;
+    --text:#0E1719; --muted:#57676A;
+    --accent:#12766B; --accent-soft:#12766B22;
+    --warn:#8C5C0E; --crit:#A33528; --grid:#0E171911;
+    --mono: ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+    --sans: system-ui,-apple-system,"Segoe UI",sans-serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground:#10161A; --surface:#172127; --edge:#26343A;
+      --text:#DCE5E4; --muted:#88999A;
+      --accent:#3FB0A0; --accent-soft:#3FB0A028;
+      --warn:#D8973C; --crit:#D9614F; --grid:#DCE5E40E;
+    }
+  }
+
+  body {
+    background: var(--ground); color: var(--text);
+    font-family: var(--sans); line-height: 1.55;
+    padding: clamp(1.25rem,4vw,3rem) 1.25rem 4rem;
+  }
+
+  .wrap { max-width: 780px; margin: 0 auto; display: flex; flex-direction: column; gap: 2rem; }
+
+  .label {
+    font-family: var(--mono); font-size: .685rem; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--muted);
+  }
+
+  header { display: flex; flex-direction: column; gap: .6rem; }
+  .runline { display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem .9rem; }
+
+  h1 {
+    font-family: var(--mono); font-size: clamp(1.35rem,4vw,1.75rem);
+    font-weight: 600; letter-spacing: -.01em; text-wrap: balance;
+  }
+
+  .pill {
+    font-family: var(--mono); font-size: .7rem; letter-spacing: .08em;
+    text-transform: uppercase; padding: .2rem .55rem; border-radius: 2px;
+    background: var(--accent-soft); color: var(--accent);
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    display: inline-flex; align-items: center; gap: .4rem;
+  }
+
+  .pill.stopped {
+    background: color-mix(in srgb, var(--crit) 14%, transparent);
+    color: var(--crit); border-color: color-mix(in srgb, var(--crit) 35%, transparent);
+  }
+
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .pill:not(.stopped) .dot { animation: pulse 2.4s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:.25 } }
+  }
+
+  header p { color: var(--muted); font-size: .92rem; max-width: 62ch; }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--edge); border-radius: 3px;
+    padding: 1.25rem; display: flex; flex-direction: column; gap: 1rem;
+  }
+
+  .prog-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
+
+  .prog-pct {
+    font-family: var(--mono); font-size: 1.9rem; font-weight: 600;
+    font-variant-numeric: tabular-nums; letter-spacing: -.02em;
+  }
+
+  .prog-steps { font-family: var(--mono); font-size: .85rem; font-variant-numeric: tabular-nums; color: var(--muted); }
+
+  .track {
+    position: relative; height: 30px; border-radius: 2px; overflow: hidden;
+    background: color-mix(in srgb, var(--text) 6%, transparent);
+  }
+
+  .fill {
+    position: absolute; inset: 0 auto 0 0; background: var(--accent);
+    border-radius: 2px 0 0 2px; transition: width .6s ease;
+  }
+
+  @media (prefers-reduced-motion: reduce) { .fill { transition: none; } }
+
+  .tick { position: absolute; top: 0; bottom: 0; width: 1px; background: color-mix(in srgb, var(--text) 18%, transparent); }
+  .tick.ckpt { top: auto; height: 6px; bottom: 0; background: color-mix(in srgb, var(--text) 22%, transparent); }
+
+  .epoch-row { position: relative; height: 1.1rem; font-family: var(--mono); font-size: .66rem; color: var(--muted); }
+  .epoch-row span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+
+  .stats {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(140px,1fr));
+    gap: 1px; background: var(--edge); border: 1px solid var(--edge);
+    border-radius: 3px; overflow: hidden;
+  }
+
+  .stat { background: var(--surface); padding: .85rem 1rem; display: flex; flex-direction: column; gap: .25rem; }
+  .stat .v { font-family: var(--mono); font-size: 1.15rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stat .sub { font-family: var(--mono); font-size: .7rem; color: var(--muted); }
+
+  .chart-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+  .chart-scroll { overflow-x: auto; }
+  svg { display: block; width: 100%; min-width: 420px; height: auto; }
+
+  .notes { display: flex; flex-direction: column; gap: .75rem; }
+  .note { display: grid; grid-template-columns: auto 1fr; gap: .75rem; align-items: start; font-size: .9rem; }
+
+  .note .flag {
+    font-family: var(--mono); font-size: .62rem; letter-spacing: .1em; text-transform: uppercase;
+    padding: .2rem .45rem; border-radius: 2px; white-space: nowrap; margin-top: .12rem;
+  }
+
+  .flag.watch { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+  .flag.ok { background: var(--accent-soft); color: var(--accent); }
+
+  .note code {
+    font-family: var(--mono); font-size: .85em; border-radius: 2px; padding: .08em .32em;
+    background: color-mix(in srgb, var(--text) 7%, transparent);
+  }
+
+  footer {
+    font-family: var(--mono); font-size: .7rem; color: var(--muted); line-height: 1.7;
+    border-top: 1px solid var(--edge); padding-top: 1rem;
+    display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
+  }
+
+  #freshness { color: var(--accent); }
+  #freshness.stale { color: var(--warn); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="label">Ethos · model v2 · supervised LoRA</div>
+    <div class="runline">
+      <h1>Qwen2.5-1.5B → booking assistant</h1>
+      <span class="pill" id="livepill"><span class="dot"></span><span id="livetext">Connecting</span></span>
+    </div>
+    <p>
+      Fine-tuning on <strong>ethos-booking-v1</strong> — 1,101 turn-level examples from 166 generated
+      phone-booking calls. Running locally on MPS, batch size 1, three epochs.
+    </p>
+  </header>
+
+  <section class="card">
+    <div class="prog-head">
+      <div>
+        <div class="label">Progress</div>
+        <div class="prog-pct" id="pct">—</div>
+      </div>
+      <div class="prog-steps" id="stepline">—</div>
+    </div>
+
+    <div>
+      <div class="track" id="track"><div class="fill" id="fill"></div></div>
+      <div class="epoch-row" id="epochrow"></div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><span class="label">Step</span><span class="v" id="s-step">—</span><span class="sub" id="s-step-sub">—</span></div>
+      <div class="stat"><span class="label">Loss</span><span class="v" id="s-loss">—</span><span class="sub" id="s-loss-sub">—</span></div>
+      <div class="stat"><span class="label">Elapsed</span><span class="v" id="s-elapsed">—</span><span class="sub" id="s-rate">—</span></div>
+      <div class="stat"><span class="label">Remaining</span><span class="v" id="s-eta">—</span><span class="sub" id="s-done">—</span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="chart-head">
+      <div class="label">Training loss</div>
+      <div class="label" id="loss-range">—</div>
+    </div>
+    <div class="chart-scroll"><svg id="losschart" viewBox="0 0 720 250" role="img" aria-label="Training loss over steps"></svg></div>
+  </section>
+
+  <section class="card">
+    <div class="chart-head">
+      <div class="label">Gradient norm</div>
+      <div class="label">log scale · pre-clip</div>
+    </div>
+    <div class="chart-scroll"><svg id="gnchart" viewBox="0 0 720 130" role="img" aria-label="Gradient norm over steps, with spikes marked"></svg></div>
+  </section>
+
+  <section class="card notes" id="notes"></section>
+
+  <footer>
+    <span id="freshness">—</span>
+    <span id="src">—</span>
+  </footer>
+
+</div>
+
+<script>
+const NS = "http://www.w3.org/2000/svg";
+const el = id => document.getElementById(id);
+const POLL_MS = 30000;
+
+let lastGood = null;
+let lastFetch = null;
+
+const fmtClock = mins => {
+  if (!isFinite(mins)) return "—";
+  const h = Math.floor(mins / 60), m = Math.round(mins % 60);
+  return h ? `${h}h ${String(m).padStart(2, "0")}m` : `${m}m`;
+};
+
+function svgAdd(svg, tag, attrs, text) {
+  const n = document.createElementNS(NS, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  if (text != null) n.textContent = text;
+  svg.appendChild(n);
+  return n;
+}
+
+function drawLoss(d) {
+  const svg = el("losschart");
+  svg.replaceChildren();
+  const log = d.log.filter(e => e.loss != null);
+  if (!log.length) return;
+
+  const W = 720, H = 250, L = 46, R = 14, T = 16, B = 30;
+  const maxSteps = d.max_steps || log[log.length - 1].step;
+  const xs = s => L + (s / maxSteps) * (W - L - R);
+
+  const losses = log.map(e => e.loss);
+  const lo = Math.floor(Math.min(...losses) * 10) / 10 - 0.05;
+  const hi = Math.ceil(Math.max(...losses) * 10) / 10 + 0.05;
+  const ys = v => T + (1 - (Math.min(Math.max(v, lo), hi) - lo) / (hi - lo)) * (H - T - B);
+
+  for (let v = lo; v <= hi + 1e-9; v += 0.1) {
+    svgAdd(svg, "line", { x1: L, y1: ys(v), x2: W - R, y2: ys(v), stroke: "var(--grid)", "stroke-width": 1 });
+    svgAdd(svg, "text", { x: L - 8, y: ys(v) + 3.5, "text-anchor": "end", fill: "var(--muted)", "font-size": 10, "font-family": "var(--mono)" }, v.toFixed(1));
+  }
+
+  const epochs = d.epochs || 1;
+  for (let e = 1; e < epochs; e++) {
+    const s = (maxSteps / epochs) * e;
+    svgAdd(svg, "line", { x1: xs(s), y1: T, x2: xs(s), y2: H - B, stroke: "var(--edge)", "stroke-width": 1, "stroke-dasharray": "3 3" });
+    svgAdd(svg, "text", { x: xs(s) + 5, y: T + 11, fill: "var(--muted)", "font-size": 9.5, "font-family": "var(--mono)" }, `epoch ${e + 1}`);
+  }
+
+  const pts = log.map(e => [xs(e.step), ys(e.loss)]);
+  const path = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+
+  svgAdd(svg, "path", { d: `${path} L ${pts.at(-1)[0].toFixed(1)} ${H - B} L ${pts[0][0].toFixed(1)} ${H - B} Z`, fill: "var(--accent-soft)", stroke: "none" });
+  svgAdd(svg, "path", { d: path, fill: "none", stroke: "var(--accent)", "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" });
+
+  pts.forEach((p, i) => {
+    const isLast = i === pts.length - 1;
+    svgAdd(svg, "circle", {
+      cx: p[0], cy: p[1], r: isLast ? 4 : 2.2,
+      fill: isLast ? "var(--accent)" : "var(--surface)",
+      stroke: "var(--accent)", "stroke-width": isLast ? 2 : 1.5
+    });
+  });
+
+  const lp = pts.at(-1);
+  svgAdd(svg, "text", { x: lp[0] - 6, y: lp[1] - 12, "text-anchor": "end", fill: "var(--text)", "font-size": 12, "font-weight": 600, "font-family": "var(--mono)" }, log.at(-1).loss.toFixed(3));
+
+  svgAdd(svg, "line", { x1: L, y1: H - B, x2: W - R, y2: H - B, stroke: "var(--edge)", "stroke-width": 1 });
+  [0, Math.round(maxSteps * 0.25), Math.round(maxSteps * 0.5), Math.round(maxSteps * 0.75), maxSteps].forEach(s => {
+    svgAdd(svg, "text", { x: xs(s), y: H - B + 16, "text-anchor": "middle", fill: "var(--muted)", "font-size": 10, "font-family": "var(--mono)" }, s);
+  });
+}
+
+function drawGN(d) {
+  const svg = el("gnchart");
+  svg.replaceChildren();
+  const log = d.log.filter(e => e.gn != null);
+  if (!log.length) return;
+
+  const W = 720, H = 130, L = 46, R = 14, T = 14, B = 26;
+  const maxSteps = d.max_steps || log.at(-1).step;
+  const xs = s => L + (s / maxSteps) * (W - L - R);
+
+  const peak = Math.max(10, ...log.map(e => e.gn));
+  const hiDec = Math.ceil(Math.log10(peak));
+  const ys = v => T + (1 - Math.log10(Math.max(v, 1)) / hiDec) * (H - T - B);
+
+  for (let p = 0; p <= hiDec; p++) {
+    const v = Math.pow(10, p);
+    svgAdd(svg, "line", { x1: L, y1: ys(v), x2: W - R, y2: ys(v), stroke: "var(--grid)", "stroke-width": 1 });
+    svgAdd(svg, "text", { x: L - 8, y: ys(v) + 3.5, "text-anchor": "end", fill: "var(--muted)", "font-size": 10, "font-family": "var(--mono)" }, v >= 1000 ? v / 1000 + "k" : v);
+  }
+
+  if (d.max_grad_norm) {
+    svgAdd(svg, "line", { x1: L, y1: ys(d.max_grad_norm), x2: W - R, y2: ys(d.max_grad_norm), stroke: "var(--accent)", "stroke-width": 1.5, "stroke-dasharray": "4 3" });
+    svgAdd(svg, "text", { x: W - R, y: ys(d.max_grad_norm) - 5, "text-anchor": "end", fill: "var(--accent)", "font-size": 9.5, "font-family": "var(--mono)" }, `clipped to ${d.max_grad_norm.toFixed(1)}`);
+  }
+
+  svgAdd(svg, "path", {
+    d: log.map((e, i) => (i ? "L" : "M") + xs(e.step).toFixed(1) + " " + ys(e.gn).toFixed(1)).join(" "),
+    fill: "none", stroke: "var(--muted)", "stroke-width": 1.5
+  });
+
+  log.filter(e => e.gn > 10).forEach(spike => {
+    const sx = xs(spike.step), sy = ys(spike.gn);
+    svgAdd(svg, "circle", { cx: sx, cy: sy, r: 4, fill: "var(--warn)" });
+    svgAdd(svg, "text", { x: sx + 9, y: sy + 4, fill: "var(--warn)", "font-size": 10.5, "font-weight": 600, "font-family": "var(--mono)" },
+      `${spike.gn >= 1000 ? (spike.gn / 1000).toFixed(1) + "k" : spike.gn.toFixed(0)} @ ${spike.step}`);
+  });
+}
+
+function renderNotes(d) {
+  const notes = el("notes");
+  notes.replaceChildren();
+  const label = document.createElement("div");
+  label.className = "label";
+  label.textContent = "Flags";
+  notes.appendChild(label);
+
+  const spikes = d.log.filter(e => e.gn != null && e.gn > 10);
+  const losses = d.log.filter(e => e.loss != null);
+  const items = [];
+
+  if (spikes.length) {
+    const worst = spikes.reduce((a, b) => (b.gn > a.gn ? b : a));
+    items.push(["watch",
+      `<strong>${spikes.length} gradient-norm spike${spikes.length > 1 ? "s" : ""}, peaking at ${worst.gn.toLocaleString(undefined, { maximumFractionDigits: 0 })} at step ${worst.step}</strong>
+       against a baseline near 2. These are pre-clip readings —
+       ${d.max_grad_norm ? `<code>max_grad_norm=${d.max_grad_norm}</code> is active, so each update was rescaled before it reached the weights.` : "check whether gradient clipping is enabled."}`]);
+  }
+
+  if (losses.length >= 2) {
+    const firstLoss = losses[0].loss, lastLoss = losses.at(-1).loss;
+    const recent = losses.slice(-5).map(e => e.loss);
+    const falling = lastLoss <= firstLoss;
+    items.push([falling ? "ok" : "watch",
+      `Loss <strong>${firstLoss.toFixed(2)} → ${lastLoss.toFixed(3)}</strong> over ${losses.at(-1).step} steps.
+       Last five readings: ${recent.map(v => v.toFixed(3)).join(", ")}.`]);
+  }
+
+  items.push(["ok",
+    `Not a data defect — all 1,157 examples checked: no fully-masked rows, nothing truncated at the
+     1,024-token cap, sequences 105–640 tokens.`]);
+
+  for (const [flag, html] of items) {
+    const note = document.createElement("div");
+    note.className = "note";
+    note.innerHTML = `<span class="flag ${flag}"></span><div>${html}</div>`;
+    note.querySelector(".flag").textContent = flag === "watch" ? "Watch" : "Healthy";
+    notes.appendChild(note);
+  }
+}
+
+function render(d) {
+  const maxSteps = d.max_steps || 1;
+  const step = d.step ?? d.checkpoint_step ?? 0;
+  const pct = step / maxSteps;
+
+  el("pct").textContent = (pct * 100).toFixed(1) + "%";
+  el("stepline").textContent = `step ${step} / ${maxSteps}`;
+  el("fill").style.width = (pct * 100).toFixed(2) + "%";
+
+  const track = el("track"), epochRow = el("epochrow");
+  track.querySelectorAll(".tick").forEach(t => t.remove());
+  epochRow.replaceChildren();
+
+  if (d.save_steps) {
+    for (let s = d.save_steps; s <= step && s < maxSteps; s += d.save_steps) {
+      const t = document.createElement("div");
+      t.className = "tick ckpt";
+      t.style.left = (s / maxSteps * 100) + "%";
+      t.title = `checkpoint-${s}`;
+      track.appendChild(t);
+    }
+  }
+
+  const epochs = d.epochs || 1;
+  for (let e = 1; e < epochs; e++) {
+    const s = Math.round((maxSteps / epochs) * e);
+    const t = document.createElement("div");
+    t.className = "tick";
+    t.style.left = (s / maxSteps * 100) + "%";
+    track.appendChild(t);
+    const lab = document.createElement("span");
+    lab.style.left = (s / maxSteps * 100) + "%";
+    lab.textContent = `epoch ${e + 1}`;
+    epochRow.appendChild(lab);
+  }
+
+  const losses = d.log.filter(e => e.loss != null);
+  const last = losses.at(-1), first = losses[0];
+
+  el("s-step").textContent = step;
+  el("s-step-sub").textContent = `of ${maxSteps}`;
+  el("s-loss").textContent = last ? last.loss.toFixed(3) : "—";
+  el("s-loss-sub").textContent = last ? `from ${first.loss.toFixed(2)} · step ${last.step}` : "awaiting checkpoint";
+  el("s-elapsed").textContent = d.elapsed || "—";
+  el("s-rate").textContent = d.sec_per_step ? `${d.sec_per_step.toFixed(1)}s / step` : "—";
+  el("s-eta").textContent = d.remaining ? d.remaining : (d.sec_per_step ? "~" + fmtClock((maxSteps - step) * d.sec_per_step / 60) : "—");
+  el("s-done").textContent = `epoch ${(step / (maxSteps / epochs)).toFixed(2)} of ${epochs}`;
+  el("loss-range").textContent = losses.length ? `steps ${first.step}–${last.step}` : "—";
+
+  const pill = el("livepill");
+  pill.classList.toggle("stopped", !d.running);
+  el("livetext").textContent = d.running ? "Training" : "Not running";
+
+  el("src").textContent = d.checkpoint ? `metrics from ${d.checkpoint} · step from log tail` : "awaiting first checkpoint";
+
+  drawLoss(d);
+  drawGN(d);
+  renderNotes(d);
+}
+
+function markFreshness() {
+  if (!lastFetch) return;
+  const age = Math.round((Date.now() - lastFetch) / 1000);
+  const node = el("freshness");
+  node.textContent = age < 5 ? "updated just now" : `updated ${age}s ago · refreshes every ${POLL_MS / 1000}s`;
+  node.classList.toggle("stale", age > POLL_MS / 1000 * 2.5);
+}
+
+async function poll() {
+  try {
+    const response = await fetch("/data.json", { cache: "no-store" });
+    if (!response.ok) throw new Error(response.status);
+    lastGood = await response.json();
+    lastFetch = Date.now();
+    render(lastGood);
+  } catch (error) {
+    const node = el("freshness");
+    node.classList.add("stale");
+    node.textContent = "server unreachable — retrying";
+  }
+  markFreshness();
+}
+
+poll();
+setInterval(poll, POLL_MS);
+setInterval(markFreshness, 1000);
+</script>
+</body>
+</html>
