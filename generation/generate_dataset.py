@@ -455,10 +455,23 @@ def write_manifest(args: argparse.Namespace, generated: int, examples: int, fail
                    scenarios: dict[int, Scenario]) -> Path:
     """Record exactly what produced this file, so a dataset version is reproducible."""
     here = Path(__file__).resolve().parent
-    counts = {
-        field: dict(collections.Counter(getattr(s, field) for s in scenarios.values()))
-        for field in ("persona", "complication", "intent", "service")
+    # Count what was actually written, not what was sampled. On a --resume the sampler is
+    # re-seeded and produces different scenarios for the indices already on disk, so counting
+    # the plan would describe a run that never happened.
+    written: dict[str, collections.Counter] = {
+        field: collections.Counter() for field in ("persona", "complication", "intent", "service")
     }
+    seen_conversations: set[int] = set()
+    if args.out.exists():
+        with args.out.open(encoding="utf-8") as handle:
+            for line in handle:
+                row = json.loads(line)
+                if row["conversation_id"] in seen_conversations:
+                    continue
+                seen_conversations.add(row["conversation_id"])
+                for field in written:
+                    written[field][row[field]] += 1
+    counts = {field: dict(counter) for field, counter in written.items()}
     manifest = {
         "dataset_version": args.dataset_version,
         "created": datetime.date.today().isoformat(),
