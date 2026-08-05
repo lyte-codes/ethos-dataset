@@ -80,6 +80,45 @@ Run the same handful of calls through both. What the fine-tune should improve:
 Eval loss alone will not tell you whether the last point improved. Check it by hand, or run
 `check_quality.py`'s rules over generated conversations.
 
+## Penalising invented details (model v3)
+
+Supervised training rewards the right answer but never marks a wrong one as wrong. If the
+model states a phone number the caller never gave, SFT simply does not reinforce it — there
+is no gradient pushing against it. Preference training supplies that gradient.
+
+```bash
+python3 generation/build_preference_pairs.py \
+    --data data/ethos_booking_v1.jsonl --out data/ethos_preferences_v1.jsonl
+python3 training/train_dpo.py \
+    --data data/ethos_preferences_v1.jsonl --sft-adapter checkpoints/ethos-qwen-lora
+```
+
+Pairs are built by corrupting a clean response: same conversation, same wording, only the
+detail changed. The model sees a phone number copied correctly and the same sentence with
+different digits, and learns which one the context supports.
+
+| Parameter | Default | Why |
+|---|---|---|
+| `beta` | 0.1 | How far the model may drift from the SFT model. Lower punishes harder but risks degrading fluency; raise toward 0.3 if responses get terse or strange. |
+| `learning_rate` | 5e-6 | Roughly 40x lower than the SFT rate. DPO destabilises quickly at SFT learning rates. |
+| `epochs` | 1 | Preference data overfits fast. Watch the reward margin rather than adding epochs. |
+
+`ref_model=None` is deliberate: with a PEFT model, `DPOTrainer` uses the adapter-disabled
+model as the reference, so a second copy is never loaded.
+
+### Checking it worked
+
+Reward accuracy above ~0.9 in the training logs means the model reliably prefers the correct
+detail. That is necessary but not sufficient — confirm on real generations:
+
+```bash
+python3 training/infer.py --adapter checkpoints/ethos-qwen-dpo
+```
+
+Give a phone number mid-call and see whether the readback reproduces it exactly. Then run the
+same call against v2 and v1. If v2 already copies numbers faithfully, v3 is not buying you
+anything, and that is worth knowing before you keep it.
+
 ## Results
 
 Not yet measured. Fill in after the first run:

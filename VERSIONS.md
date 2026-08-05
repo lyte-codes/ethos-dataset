@@ -11,7 +11,23 @@ See [docs/VERSIONING.md](docs/VERSIONING.md) for when to bump which number.
 | Version | What it is | Base | Trained on | Status |
 |---|---|---|---|---|
 | **v1** | Stock `Qwen2.5-1.5B-Instruct`, no fine-tuning. The baseline every later version is measured against. | — | nothing | available (just the base model) |
-| **v2** | First LoRA fine-tune. | Qwen2.5-1.5B-Instruct | `ethos-booking-v1` | not trained yet |
+| **v2** | First LoRA fine-tune (supervised). Learns the job: one question at a time, read the booking back. | Qwen2.5-1.5B-Instruct | `ethos-booking-v1` | not trained yet |
+| **v3** | v2 plus preference training that penalises inventing caller details — wrong phone numbers above all. | model v2 | `ethos-preferences-v1` | not trained yet |
+
+### Why the penalty is v3 and not v2
+
+Supervised fine-tuning cannot punish anything. Its loss only rewards reproducing the correct
+next token, so a hallucinated phone number is never marked *wrong* — merely not reinforced.
+Penalising it needs preference training (DPO), which compares two responses to the same
+conversation and pushes probability away from the bad one.
+
+DPO also has to start from a model that already does the task, using it as its own reference
+point. So v2 has to exist before v3 can be trained. This is a sequence, not a choice between
+them.
+
+Keeping them as separate versions is also the only way to know whether the penalty helped. If
+v2 already stopped inventing numbers, v3 costs training time for nothing — and you can only
+see that by comparing v2 against v3 on the same calls.
 
 v1 is deliberately the untouched model. It costs nothing to "have", and without it there is
 no way to tell whether v2 actually improved anything. Run it with:
@@ -24,7 +40,22 @@ python3 training/infer.py --base-only     # this is v1
 
 | Version | Conversations | Examples | Generator | Quality gate | Status |
 |---|---|---|---|---|---|
-| **v1** | 500 (target) | ~4,000 (est.) | `llama3.1:8b` @ temp 0.9 | full rule set | not generated yet |
+| **ethos-booking-v1** | 500 (target) | ~4,000 (est.) | `llama3.1:8b` @ temp 0.9 | full rule set | not generated yet |
+| **ethos-preferences-v1** | derived | ~1 pair per example | corruption of booking-v1 | n/a | not built yet |
+
+`ethos-preferences-v1` is derived from `ethos-booking-v1`, not generated separately. Each pair
+shares a conversation and differs only in the assistant's response — the chosen one copies a
+detail the caller gave, the rejected one states a plausible but wrong value:
+
+```bash
+python3 generation/build_preference_pairs.py \
+    --data data/ethos_booking_v1.jsonl \
+    --out  data/ethos_preferences_v1.jsonl
+```
+
+Corruptions, in the order they are applied: wrong phone digits, wrong clock time, wrong
+weekday, and addressing the caller by a name they never gave. Phone numbers take priority
+because they appear in the fewest responses and are the costliest to get wrong.
 
 ### Pre-v1
 
