@@ -92,6 +92,7 @@ def known_tokens(text: str) -> set[str]:
 
 BRIEF_PHONE = re.compile(r"Contact number:\s*([\d\s\-()+]{7,})")
 BRIEF_NAME = re.compile(r"- Name:\s*(.+)")
+BRIEF_AGENT = re.compile(r"You are ([A-Z][\w'\-]*(?: [A-Z][\w'\-]*)?), a booking agent")
 
 
 def check(examples: list[dict], business_words: set[str]) -> list[str]:
@@ -100,6 +101,9 @@ def check(examples: list[dict], business_words: set[str]) -> list[str]:
     # generator baked into every example.
     match = BRIEF_PHONE.search(system)
     name = BRIEF_NAME.search(system)
+    agent = BRIEF_AGENT.search(system)
+    if agent:
+        business_words = business_words | known_tokens(agent.group(1))
     return conversation_problems(turns, intent, business_words | known_tokens(system),
                                  brief_digits=match.group(1) if match else "",
                                  client_name=name.group(1).strip() if name else "")

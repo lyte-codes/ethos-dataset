@@ -56,8 +56,8 @@ CALL_INTENTS = {
 INTENT_WEIGHTS = {"new_booking": 0.65, "reschedule": 0.2, "cancellation": 0.15}
 
 AGENT_SYSTEM_PROMPT = (
-    "You are a booking agent. You are phoning {business_name} on behalf of your client to "
-    "arrange an appointment. {business_context}\n"
+    "You are {agent_name}, a booking agent. You are phoning {business_name} on behalf of your "
+    "client to arrange an appointment. {business_context}\n"
     "\n"
     "Your client's brief — these are the only facts you have:\n"
     "- Name: {client_name}\n"
@@ -65,7 +65,8 @@ AGENT_SYSTEM_PROMPT = (
     "- Needs: {service}\n"
     "- Available: {availability}\n"
     "\n"
-    "Say who you are and who you are calling for. Ask for what your client needs and agree a "
+    "Introduce yourself as {agent_name} and say who you are calling for. Ask for what your "
+    "client needs and agree a "
     "specific weekday and clock time that falls inside your client's availability. Give a "
     "detail from the brief only when the business asks for it, and never state a name, number, "
     "date or time that is not in the brief. If the business asks for anything the brief does "
@@ -87,7 +88,8 @@ Rules:
 - Speakers strictly alternate: business, assistant, business, assistant, and so on.
 - Between 8 and 20 turns in total.
 - Spoken language only. No stage directions, no "[background noise]", no speaker labels inside the text, no markdown.
-- The assistant is NOT the client. It is a third party calling for them. It introduces itself as calling "on behalf of" the named client and refers to that client in the third person throughout ("she is free Monday", "his number is ..."). It must never say "this is <client name>", "my name is <client name>", or otherwise speak as though it were the client.
+- The assistant is NOT the client. It is a third party calling for them. It introduces itself by its OWN name, which is given in the brief, then says it is calling "on behalf of" the named client, and refers to that client in the third person throughout ("she is free Monday", "his number is ..."). It must never say "this is <client name>", "my name is <client name>", or otherwise speak as though it were the client.
+- The assistant never invents an employer, agency or office for itself beyond the name in the brief.
 - The assistant knows ONLY what the brief says. It must never state a name, phone number, date or time that is not in the brief. It gives each detail only when the business asks for it.
 - If the business asks for anything outside the brief, the assistant says it will check with the client. It never invents an answer and never commits to a price.
 - The business and the assistant settle on a specific weekday and clock time that falls inside the client's stated availability.
@@ -102,6 +104,7 @@ GENERATOR_USER_PROMPT = """Business being called: {business_name}
 Context: {business_context}
 
 The agent's brief:
+- The agent's own name: {agent_name}
 - Client name: {client_name}
 - Client contact number: {client_phone}
 - Needs: {service}
@@ -115,7 +118,7 @@ Complication: {complication_description}
 Write the full call as JSON."""
 
 BOOKING_CHECKLIST = """Before you finish, check the call contains all of these:
-1. the assistant says who it is calling on behalf of, using the client name from the brief
+1. the assistant introduces itself by the agent name in the brief and says who it is calling on behalf of, using the client name from the brief
 2. the assistant speaks the client's contact number out loud, as digits, only after the business asks for it
 3. the business and the assistant settle on a specific weekday and a clock time inside the client's availability
 4. the business reads the booking back, and the assistant confirms or corrects it against the brief
@@ -221,8 +224,10 @@ def sample_scenario(rng: random.Random) -> Scenario:
     )
 
 
-def agent_system_prompt(business_name: str, business_context: str, scenario: Scenario) -> str:
+def agent_system_prompt(business_name: str, business_context: str, scenario: Scenario,
+                        agent_name: str) -> str:
     return AGENT_SYSTEM_PROMPT.format(
+        agent_name=agent_name,
         business_name=business_name,
         business_context=business_context,
         client_name=scenario.client.name,
@@ -256,7 +261,7 @@ def conversation_schema(min_turns: int, max_turns: int) -> dict:
 
 
 def call_ollama(base_url: str, model: str, temperature: float, timeout: int, scenario: Scenario,
-                business_name: str, business_context: str, schema: dict | None = None,
+                business_name: str, business_context: str, agent_name: str, schema: dict | None = None,
                 num_predict: int = 2048, keep_alive: str = "30m") -> str:
     payload = {
         "model": model,
@@ -269,6 +274,7 @@ def call_ollama(base_url: str, model: str, temperature: float, timeout: int, sce
             {
                 "role": "user",
                 "content": GENERATOR_USER_PROMPT.format(
+                    agent_name=agent_name,
                     business_name=business_name,
                     business_context=business_context,
                     client_name=scenario.client.name,
@@ -413,14 +419,14 @@ def generate_conversation(args: argparse.Namespace, scenario: Scenario,
     # The brief is per-conversation, so what the agent is allowed to say is too: the client's
     # own name is legitimate for it to speak, and any other name is an invention.
     brief = scenario.client
-    allowed_words = business_words | known_tokens(brief.name)
+    allowed_words = business_words | known_tokens(brief.name) | known_tokens(args.agent_name)
     errors = []
     for attempt in range(1, args.max_retries + 1):
         try:
             min_turns = minimum_turns(scenario)
             raw = call_ollama(
                 args.base_url, args.model, args.temperature, args.timeout,
-                scenario, args.business_name, args.business_context,
+                scenario, args.business_name, args.business_context, args.agent_name,
                 schema=None if args.no_schema else conversation_schema(min_turns, args.max_turns),
                 num_predict=args.num_predict,
             )
@@ -471,6 +477,7 @@ def write_manifest(args: argparse.Namespace, generated: int, examples: int, fail
             "check_quality.py": file_digest(here / "check_quality.py"),
         },
         "business": {"name": args.business_name, "context": args.business_context},
+        "agent_name": args.agent_name,
         "agent_role": "outbound — the assistant phones the business on behalf of a client",
         # The brief differs per conversation, so the template is what identifies the dataset;
         # the filled-in version lives in each example's system message.
@@ -531,6 +538,9 @@ def parse_args() -> argparse.Namespace:
                         help="keep conversations that fail the check_quality rules")
     parser.add_argument("--timeout", type=int, default=180, help="per-request timeout in seconds")
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--agent-name", default="Ethos",
+                        help="what the agent calls itself on the phone; part of its brief so the "
+                             "quality gate can tell self-identification from invention")
     parser.add_argument("--dataset-version", default="dev",
                         help="version label recorded in the manifest, e.g. v1")
     parser.add_argument("-w", "--workers", type=int, default=1,
@@ -590,7 +600,7 @@ def main() -> int:
                       file=sys.stderr, flush=True)
             else:
                 system_prompt = agent_system_prompt(
-                    args.business_name, args.business_context, scenario)
+                    args.business_name, args.business_context, scenario, args.agent_name)
                 for example in build_examples(turns, system_prompt, scenario, index):
                     out_file.write(json.dumps(example, ensure_ascii=False) + "\n")
                     example_count += 1
