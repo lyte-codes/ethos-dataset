@@ -22,3 +22,8 @@ data/fake_calls.json
 # handoff inbox — see NEXT.md
 NEXT.md.bak
 NEXT.md
+
+# Real-call feedback. Everything under private/ stays on this machine: it is derived
+# from actual calls, so it contains real names and real phone numbers. The public repo
+# ships the code and the synthetic data, never this.
+private/

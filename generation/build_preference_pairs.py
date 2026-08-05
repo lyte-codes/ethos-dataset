@@ -139,6 +139,11 @@ def main() -> int:
     parser.add_argument("--out", type=Path, default=Path("data/ethos_preferences_v1.jsonl"))
     parser.add_argument("--per-example", type=int, default=1,
                         help="maximum pairs generated from a single training example")
+    parser.add_argument("--corrections", type=Path, default=Path("private/corrections.jsonl"),
+                        help="real mistakes recorded from deployed calls, folded in if present")
+    parser.add_argument("--correction-weight", type=int, default=3,
+                        help="how many times each real correction is repeated in the output")
+    parser.add_argument("--no-corrections", action="store_true")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
@@ -147,6 +152,27 @@ def main() -> int:
         examples = [json.loads(line) for line in handle]
 
     pairs = build_pairs(examples, rng, args.per_example)
+
+    # A real mistake is worth more than a manufactured one: it is a failure the model
+    # actually produced, on a call that actually happened, rather than a corruption
+    # invented for it. There will be far fewer of them, so they are repeated to stop the
+    # synthetic majority from drowning them out.
+    real = 0
+    if not args.no_corrections and args.corrections.exists():
+        with args.corrections.open(encoding="utf-8") as handle:
+            for line in handle:
+                correction = json.loads(line)
+                pair = {
+                    "messages": correction["messages"],
+                    "chosen": correction["chosen"],
+                    "rejected": correction["rejected"],
+                    "corruption": "real_correction",
+                    "conversation_id": None,
+                    "source_build": correction.get("build", "unknown"),
+                }
+                pairs.extend([pair] * args.correction_weight)
+                real += 1
+
     with args.out.open("w", encoding="utf-8") as out_file:
         for pair in pairs:
             out_file.write(json.dumps(pair, ensure_ascii=False) + "\n")
@@ -155,6 +181,11 @@ def main() -> int:
     for pair in pairs:
         counts[pair["corruption"]] = counts.get(pair["corruption"], 0) + 1
     print(f"{len(examples)} examples -> {len(pairs)} preference pairs")
+    if real:
+        print(f"  including {real} real correction(s) from {args.corrections}, "
+              f"each repeated {args.correction_weight}x")
+    elif not args.no_corrections:
+        print(f"  no real corrections yet ({args.corrections} absent) — synthetic only")
     for kind, count in sorted(counts.items(), key=lambda item: -item[1]):
         print(f"  {kind:15s} {count}")
     print(f"written to {args.out}")
