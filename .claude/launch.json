@@ -4,7 +4,17 @@
     {
       "name": "progress",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["training/progress_server.py", "--port", "8777"],
+      "runtimeArgs": [
+        "training/progress_server.py",
+        "--port",
+        "8777",
+        "--output",
+        "checkpoints/ethos-v4",
+        "--log",
+        "v4-train.log",
+        "--generation-log",
+        "v2-generate.log"
+      ],
       "port": 8777
     }
   ]

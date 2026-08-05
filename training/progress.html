@@ -73,6 +73,10 @@
     padding: 1.25rem; display: flex; flex-direction: column; gap: 1rem;
   }
 
+  /* A class-level `display` beats the UA sheet's `[hidden] { display: none }`, so hiding a
+     card needs to be stated at the same specificity or the attribute silently does nothing. */
+  [hidden] { display: none !important; }
+
   .prog-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
 
   .prog-pct {
@@ -114,6 +118,19 @@
   .chart-scroll { overflow-x: auto; }
   svg { display: block; width: 100%; min-width: 420px; height: auto; }
 
+  .pipe { display: flex; flex-direction: column; gap: .4rem; }
+  .stage {
+    display: grid; grid-template-columns: 1.4rem 1fr auto; gap: .75rem; align-items: center;
+    padding: .5rem 0; border-bottom: 1px solid var(--edge); font-size: .9rem;
+  }
+  .stage:last-child { border-bottom: none; }
+  .stage .mark { font-family: var(--mono); text-align: center; color: var(--muted); }
+  .stage .state {
+    font-family: var(--mono); font-size: .7rem; color: var(--muted);
+    letter-spacing: .06em; text-transform: uppercase;
+  }
+  .stage.live .mark, .stage.live .state, .stage.done .mark { color: var(--accent); }
+
   .notes { display: flex; flex-direction: column; gap: .75rem; }
   .note { display: grid; grid-template-columns: auto 1fr; gap: .75rem; align-items: start; font-size: .9rem; }
 
@@ -144,21 +161,40 @@
 <div class="wrap">
 
   <header>
-    <div class="label">Ethos · model v2 · supervised LoRA</div>
+    <div class="label">Ethos · outbound booking agent</div>
     <div class="runline">
       <h1>Qwen2.5-1.5B → booking assistant</h1>
       <span class="pill" id="livepill"><span class="dot"></span><span id="livetext">Connecting</span></span>
     </div>
     <p>
-      Fine-tuning on <strong>ethos-booking-v1</strong> — 1,101 turn-level examples from 166 generated
-      phone-booking calls. Running locally on MPS, batch size 1, three epochs.
+      A booking agent that phones a business on a client's behalf. It is briefed with the
+      client's details and may say nothing outside that brief. Generated and trained locally.
     </p>
   </header>
 
-  <section class="card">
+  <section class="card" id="gen-card" hidden>
     <div class="prog-head">
       <div>
-        <div class="label">Progress</div>
+        <div class="label">Dataset · ethos-booking-v2</div>
+        <div class="prog-pct" id="gen-pct">—</div>
+      </div>
+      <div class="prog-steps" id="gen-line">—</div>
+    </div>
+
+    <div class="track"><div class="fill" id="gen-fill"></div></div>
+
+    <div class="stats">
+      <div class="stat"><span class="label">Conversations</span><span class="v" id="g-convs">—</span><span class="sub" id="g-target">—</span></div>
+      <div class="stat"><span class="label">Examples</span><span class="v" id="g-examples">—</span><span class="sub">turn-level rows</span></div>
+      <div class="stat"><span class="label">Gate pass rate</span><span class="v" id="g-pass">—</span><span class="sub" id="g-failed">—</span></div>
+      <div class="stat"><span class="label">Remaining</span><span class="v" id="g-eta">—</span><span class="sub" id="g-rate">—</span></div>
+    </div>
+  </section>
+
+  <section class="card" id="train-card">
+    <div class="prog-head">
+      <div>
+        <div class="label">Training</div>
         <div class="prog-pct" id="pct">—</div>
       </div>
       <div class="prog-steps" id="stepline">—</div>
@@ -177,7 +213,7 @@
     </div>
   </section>
 
-  <section class="card">
+  <section class="card" id="loss-card">
     <div class="chart-head">
       <div class="label">Training loss</div>
       <div class="label" id="loss-range">—</div>
@@ -185,7 +221,7 @@
     <div class="chart-scroll"><svg id="losschart" viewBox="0 0 720 250" role="img" aria-label="Training loss over steps"></svg></div>
   </section>
 
-  <section class="card">
+  <section class="card" id="gn-card">
     <div class="chart-head">
       <div class="label">Gradient norm</div>
       <div class="label">log scale · pre-clip</div>
@@ -194,6 +230,30 @@
   </section>
 
   <section class="card notes" id="notes"></section>
+
+  <section class="card pipe" id="pipeline">
+    <div class="label">Pipeline</div>
+    <div class="stage" data-stage="dataset">
+      <span class="mark">·</span>
+      <span>Dataset <strong>ethos-booking-v2</strong> — outbound-agent calls</span>
+      <span class="state" id="p-dataset">—</span>
+    </div>
+    <div class="stage" data-stage="prefs">
+      <span class="mark">·</span>
+      <span>Preferences <strong>v2</strong> — corrupted-detail pairs</span>
+      <span class="state" id="p-prefs">Waiting</span>
+    </div>
+    <div class="stage" data-stage="v4">
+      <span class="mark">·</span>
+      <span>Model <strong>v4</strong> — supervised LoRA</span>
+      <span class="state" id="p-v4">Waiting</span>
+    </div>
+    <div class="stage" data-stage="v5">
+      <span class="mark">·</span>
+      <span>Model <strong>v5</strong> — DPO against invented details</span>
+      <span class="state" id="p-v5">Waiting</span>
+    </div>
+  </section>
 
   <footer>
     <span id="freshness">—</span>
@@ -316,6 +376,23 @@ function drawGN(d) {
 function renderNotes(d) {
   const notes = el("notes");
   notes.replaceChildren();
+  if (d.stage === "generation" && !d.log.length) {
+    const label = document.createElement("div");
+    label.className = "label";
+    label.textContent = "Flags";
+    notes.appendChild(label);
+    const g = d.generation || {};
+    const healthy = (g.pass_rate ?? 1) >= 0.8;
+    const note = document.createElement("div");
+    note.className = "note";
+    note.innerHTML =
+      `<span class="flag ${healthy ? "ok" : "watch"}">${healthy ? "Healthy" : "Watch"}</span>` +
+      `<div>The quality gate is admitting <strong>${((g.pass_rate ?? 0) * 100).toFixed(0)}%</strong> ` +
+      `of generated calls. A falling rate means the generator is drifting off the outbound role, ` +
+      `not that it has slowed down.</div>`;
+    notes.appendChild(note);
+    return;
+  }
   const label = document.createElement("div");
   label.className = "label";
   label.textContent = "Flags";
@@ -355,7 +432,56 @@ function renderNotes(d) {
   }
 }
 
+function renderGeneration(d) {
+  const g = d.generation;
+  const generating = d.stage === "generation";
+  el("gen-card").hidden = !g;
+  el("train-card").hidden = !!g && generating && !d.log.length;
+  if (!g) return;
+
+  const pct = g.target ? g.conversations / g.target : 0;
+  el("gen-pct").textContent = (pct * 100).toFixed(1) + "%";
+  el("gen-line").textContent = `${g.conversations} / ${g.target} conversations`;
+  el("gen-fill").style.width = (pct * 100).toFixed(2) + "%";
+  el("g-convs").textContent = g.conversations;
+  el("g-target").textContent = `of ${g.target}`;
+  el("g-examples").textContent = g.examples;
+  el("g-pass").textContent = g.pass_rate == null ? "—" : (g.pass_rate * 100).toFixed(0) + "%";
+  el("g-failed").textContent = `${g.failed} rejected`;
+  el("g-eta").textContent = g.running ? (g.remaining || "—") : "finished";
+  el("g-rate").textContent = g.sec_per_conversation ? `${g.sec_per_conversation.toFixed(0)}s / conv` : "—";
+}
+
+function renderPipeline(d) {
+  const g = d.generation;
+  const datasetDone = g && !g.running && g.conversations >= g.target;
+  const states = {
+    "p-dataset": g ? (g.running ? "Generating" : datasetDone ? "Done" : "Stopped") : "Waiting",
+    "p-prefs": datasetDone ? "Ready" : "Waiting",
+    "p-v4": d.stage === "training" ? "Training" : (d.log.length ? "Stopped" : "Waiting"),
+    "p-v5": "Waiting",
+  };
+  for (const [id, text] of Object.entries(states)) el(id).textContent = text;
+
+  document.querySelectorAll(".stage").forEach(node => {
+    const state = node.querySelector(".state").textContent;
+    node.classList.toggle("live", state === "Generating" || state === "Training");
+    node.classList.toggle("done", state === "Done");
+    node.querySelector(".mark").textContent =
+      state === "Done" ? "✓" : (state === "Generating" || state === "Training") ? "▸" : "·";
+  });
+}
+
 function render(d) {
+  d.log = d.log || [];
+  // Charts of an empty run read as a broken dashboard rather than a stage that has not
+  // started, so they stay out of the layout until there is something to plot.
+  const hasMetrics = d.log.length > 0;
+  el("loss-card").hidden = !hasMetrics;
+  el("gn-card").hidden = !hasMetrics;
+  el("notes").hidden = !hasMetrics && d.stage !== "generation";
+  renderGeneration(d);
+  renderPipeline(d);
   const maxSteps = d.max_steps || 1;
   const step = d.step ?? d.checkpoint_step ?? 0;
   const pct = step / maxSteps;
@@ -405,13 +531,19 @@ function render(d) {
   el("loss-range").textContent = losses.length ? `steps ${first.step}–${last.step}` : "—";
 
   const pill = el("livepill");
-  pill.classList.toggle("stopped", !d.running);
-  el("livetext").textContent = d.running ? "Training" : "Not running";
+  const live = d.stage === "training" || d.stage === "generation";
+  pill.classList.toggle("stopped", !live);
+  el("livetext").textContent =
+    d.stage === "training" ? "Training" : d.stage === "generation" ? "Generating" : "Idle";
 
-  el("src").textContent = d.checkpoint ? `metrics from ${d.checkpoint} · step from log tail` : "awaiting first checkpoint";
+  el("src").textContent = d.stage === "generation"
+    ? "dataset generation · read from the run log"
+    : d.checkpoint ? `metrics from ${d.checkpoint} · step from log tail` : "awaiting first checkpoint";
 
-  drawLoss(d);
-  drawGN(d);
+  if (hasMetrics) {
+    drawLoss(d);
+    drawGN(d);
+  }
   renderNotes(d);
 }
 
