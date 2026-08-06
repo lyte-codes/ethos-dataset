@@ -149,6 +149,16 @@
   .stage-row .mark { font-family: var(--mono); text-align: center; color: var(--muted); }
   .stage-row.live .mark, .stage-row.done .mark { color: var(--accent); }
   .stage-row.live .when { color: var(--accent); }
+  .eval-row {
+    display: grid; grid-template-columns: 3.5rem repeat(3, 1fr); gap: .5rem .9rem;
+    padding: .55rem 0; border-bottom: 1px solid var(--edge);
+    font-family: var(--mono); font-size: .85rem; font-variant-numeric: tabular-nums;
+  }
+  .eval-row:last-of-type { border-bottom: none; }
+  .eval-row.head { color: var(--muted); font-size: .68rem; letter-spacing: .1em; text-transform: uppercase; }
+  .eval-row .name { font-weight: 600; }
+  .eval-row .best { color: var(--accent); }
+  .eval-row .wide { color: var(--warn); }
   .footnote {
     font-size: .78rem; color: var(--muted); line-height: 1.6; max-width: 62ch; margin-top: .4rem;
   }
@@ -249,6 +259,19 @@
       <div class="label">log scale · pre-clip</div>
     </div>
     <div class="chart-scroll"><svg id="gnchart" viewBox="0 0 720 130" role="img" aria-label="Gradient norm over steps, with spikes marked"></svg></div>
+  </section>
+
+  <section class="card" id="eval-card" hidden>
+    <div class="prog-head">
+      <div class="label">Held-out evaluation</div>
+      <div class="label" id="eval-state">—</div>
+    </div>
+    <div id="eval-body"></div>
+    <p class="footnote">
+      Loss on 68 conversations training never saw, against 80 it did. Both fall when a model
+      learns; only the gap between them separates learning from memorising. Lower held-out
+      loss is the better model, whatever the training losses say.
+    </p>
   </section>
 
   <section class="card notes" id="notes"></section>
@@ -529,8 +552,50 @@ function renderPipeline(d) {
   }
 }
 
+function renderEval(d) {
+  const e = d.evaluation;
+  el("eval-card").hidden = !e;
+  if (!e) return;
+
+  el("eval-state").textContent = e.running
+    ? (e.current ? `scoring ${e.current} · ${e.current_split || ""} ${e.current_progress || ""}` : "running")
+    : "finished";
+
+  const body = el("eval-body");
+  body.replaceChildren();
+  const header = document.createElement("div");
+  header.className = "eval-row head";
+  header.innerHTML = "<span>model</span><span>train</span><span>held-out</span><span>gap</span>";
+  body.appendChild(header);
+
+  const results = e.results || [];
+  // The lowest held-out loss is the model that generalises best; the widest gap is the one
+  // that leaned hardest on having seen the data before. Marking both stops the table being
+  // read as "lower numbers better" across the board, which for the gap column it is not.
+  const bestHeld = Math.min(...results.map(r => r.heldout));
+  const widestGap = Math.max(...results.map(r => r.gap));
+
+  for (const r of results) {
+    const row = document.createElement("div");
+    row.className = "eval-row";
+    row.innerHTML =
+      `<span class="name">${r.model}</span>` +
+      `<span>${r.train.toFixed(3)}</span>` +
+      `<span class="${r.heldout === bestHeld ? "best" : ""}">${r.heldout.toFixed(3)}</span>` +
+      `<span class="${r.gap === widestGap ? "wide" : ""}">${r.gap >= 0 ? "+" : ""}${r.gap.toFixed(3)}</span>`;
+    body.appendChild(row);
+  }
+  if (!results.length) {
+    const row = document.createElement("div");
+    row.className = "eval-row";
+    row.innerHTML = "<span>—</span><span>waiting for the first result</span>";
+    body.appendChild(row);
+  }
+}
+
 function render(d) {
   d.log = d.log || [];
+  renderEval(d);
   // Charts of an empty run read as a broken dashboard rather than a stage that has not
   // started, so they stay out of the layout until there is something to plot.
   const hasMetrics = d.log.length > 0;
@@ -588,10 +653,11 @@ function render(d) {
   el("loss-range").textContent = losses.length ? `steps ${first.step}–${last.step}` : "—";
 
   const pill = el("livepill");
-  const live = d.stage === "training" || d.stage === "generation";
+  const live = ["training", "generation", "evaluating"].includes(d.stage);
   pill.classList.toggle("stopped", !live);
   el("livetext").textContent =
-    d.stage === "training" ? "Training" : d.stage === "generation" ? "Generating" : "Idle";
+    d.stage === "training" ? "Training" : d.stage === "generation" ? "Generating"
+    : d.stage === "evaluating" ? "Evaluating" : "Idle";
 
   el("src").textContent = d.stage === "generation"
     ? "dataset generation · read from the run log"

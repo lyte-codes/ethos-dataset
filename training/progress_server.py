@@ -63,6 +63,36 @@ def is_running(pattern: str) -> bool:
     return subprocess.run(["pgrep", "-f", pattern], capture_output=True).returncode == 0
 
 
+# "  v4  train 0.628  held-out 1.342  gap +0.714" and "    v4 train: 50/80"
+EVAL_RESULT = re.compile(r"^\s*(\S+)\s+train ([\d.]+)\s+held-out ([\d.]+)\s+gap ([+-][\d.]+)", re.M)
+EVAL_PROGRESS = re.compile(r"^\s+(\S+) (train|held-out): (\d+)/(\d+)", re.M)
+EVAL_SCORING = re.compile(r"^\s+scoring (\S+)…", re.M)
+
+
+def parse_eval(log: Path) -> dict:
+    """Held-out scoring: results already in, and how far through the current model it is."""
+    if not log.exists():
+        return {}
+    text = log.read_text(errors="replace")
+
+    results = [
+        {"model": name, "train": float(train), "heldout": float(held), "gap": float(gap)}
+        for name, train, held, gap in EVAL_RESULT.findall(text)
+    ]
+    scoring = EVAL_SCORING.findall(text)
+    progress = EVAL_PROGRESS.findall(text)
+
+    state = {"results": results, "running": is_running("eval_heldout.py")}
+    done = {r["model"] for r in results}
+    if scoring and scoring[-1] not in done:
+        state["current"] = scoring[-1]
+        if progress:
+            model, split, at, total = progress[-1]
+            state["current_split"] = split
+            state["current_progress"] = f"{at}/{total}"
+    return state
+
+
 def parse_generation(log: Path) -> dict:
     """Where the dataset run has got to, read from the same progress bar a human would."""
     if not log.exists():
@@ -264,6 +294,12 @@ def collect(output: Path, log: Path, pattern: str,
         state["stage"] = "training"
 
     state["stages"] = pipeline_stages(state)
+
+    evaluation = parse_eval(Path("logs/heldout_bf16.log"))
+    if evaluation.get("results") or evaluation.get("current"):
+        state["evaluation"] = evaluation
+        if evaluation["running"]:
+            state["stage"] = "evaluating"
 
     # The clip ceiling is what actually reaches the weights, so the dashboard needs it
     # to put a spike in context. Only recorded in the checkpoint's training_args.
