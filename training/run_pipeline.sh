@@ -29,10 +29,20 @@ cd "$(dirname "$0")/.."
 PREFS=data/ethos_preferences_v2.jsonl
 PUBLISH=1
 
-# Pinned once, at launch. The preference runs finish after midnight, and without this the
-# date would roll over mid-pipeline: one night's four builds would land under two dates with
-# the letter resetting to a partway through.
-BUILD_NIGHT="${BUILD_NIGHT:-$(date +%Y%m%d)}"
+# Pinned once per night and remembered on disk. Pinning it at launch is not enough: a
+# pipeline restarted after midnight — to pick up a fixed bug, say — recomputes the date and
+# publishes the rest of the night's builds under tomorrow, which is the exact split the pin
+# exists to prevent. The marker is written on the first run and reused by every later one,
+# and only a night with no builds yet starts a new date.
+NIGHT_FILE=logs/build-night
+if [ -n "${BUILD_NIGHT:-}" ]; then
+    :
+elif [ -s "$NIGHT_FILE" ]; then
+    BUILD_NIGHT=$(cat "$NIGHT_FILE")
+    echo "[$(date +%H:%M)] reusing build night $BUILD_NIGHT from $NIGHT_FILE"
+else
+    BUILD_NIGHT=$(date +%Y%m%d)
+fi
 [ "${1:-}" = "--no-publish" ] && PUBLISH=0
 
 # Repeated at the foot of every release, so a build found on its own still explains how
@@ -54,6 +64,7 @@ epoch 3 would have had to start over. Release ordinals follow the order the buil
 actually made."
 
 mkdir -p logs
+printf '%s' "$BUILD_NIGHT" > "$NIGHT_FILE"
 echo "[$(date +%H:%M)] build night $BUILD_NIGHT"
 
 # The comparison drives a live model for the business side of each call, so ollama has to
