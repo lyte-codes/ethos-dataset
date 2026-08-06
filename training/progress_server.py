@@ -209,8 +209,8 @@ def pipeline_stages(sft: dict) -> list[dict]:
     unpublished = next_version("0.1", published)
     scores = held_out_scores()
     sft_running = is_running("train_lora.py")
-    v4_done = Path("checkpoints/ethos-v4-epoch2/adapter_model.safetensors").exists()
-    v6_done = Path("checkpoints/ethos-v4/adapter_model.safetensors").exists()
+    v4_done = Path("checkpoints/ethos-v4/adapter_model.safetensors").exists()
+    v6_done = Path("checkpoints/ethos-v6/adapter_model.safetensors").exists()
 
     stages = []
 
@@ -385,7 +385,7 @@ def make_handler(output: Path, log: Path, pattern: str, page: Path, generation_l
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, default=Path("checkpoints/ethos-v2"))
+    parser.add_argument("--output", type=Path, default=Path("checkpoints/ethos-v6"))
     parser.add_argument("--log", type=Path, default=Path("v2-train.log"))
     parser.add_argument("--page", type=Path, default=HERE / "progress.html")
     parser.add_argument("--generation-log", type=Path, default=Path("v2-generate.log"),

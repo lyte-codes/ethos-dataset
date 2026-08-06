@@ -89,7 +89,7 @@ $SHARED_NOTES" 2>&1 | tee -a "logs/publish-${lineage}.log"
 }
 
 # --- 1st: v4, supervised, end of epoch 2 ------------------------------------------
-publish checkpoints/ethos-v4-epoch2 v4 \
+publish checkpoints/ethos-v4 v4 \
     "Supervised only, cut at the end of epoch 2 of a three-epoch run. Preference
 training has not been applied, so nothing in this build penalises repeating a detail
 the brief never contained — expect it to fail that gate."
@@ -99,12 +99,12 @@ the brief never contained — expect it to fail that gate."
 # still evening. Resuming restores optimizer and scheduler state from that checkpoint, so
 # the last 164 steps run on the schedule they were always going to run on rather than a
 # fresh warmup. Only then is this v6.
-train v6-resume checkpoints/ethos-v4/adapter_model.safetensors \
+train v6-resume checkpoints/ethos-v6/adapter_model.safetensors \
     python3 training/train_lora.py --data data/ethos_booking_v2.jsonl \
         --output checkpoints/ethos-v4 --batch-size 1 \
         --resume-from-checkpoint checkpoints/ethos-v4/checkpoint-850
 
-publish checkpoints/ethos-v4 v6 \
+publish checkpoints/ethos-v6 v6 \
     "Supervised only, all three epochs — the completion of the very run that produced
 v4 at its epoch-2 mark. Same data, same hyperparameters, one more pass. Cut at step 900
 at step 850 in the evening and resumed to 1014 overnight from optimizer and scheduler
@@ -113,7 +113,7 @@ state, so the learning-rate schedule is unbroken. Still no preference training."
 # --- 3rd: v5, preference training on v4 -------------------------------------------
 train v5-dpo checkpoints/ethos-v5/adapter_model.safetensors \
     python3 training/train_dpo.py --data "$PREFS" \
-        --sft-adapter checkpoints/ethos-v4-epoch2 --output checkpoints/ethos-v5 --batch-size 1
+        --sft-adapter checkpoints/ethos-v4 --output checkpoints/ethos-v5 --batch-size 1
 
 publish checkpoints/ethos-v5 v5 \
     "Preference training applied to v4. Built third rather than second because v4 and
@@ -131,24 +131,24 @@ preference training began."
 echo "[$(date +%H:%M)] held-out loss for all four"
 python3 training/eval_heldout.py \
     --adapter base: \
-    --adapter v4:checkpoints/ethos-v4-epoch2 \
+    --adapter v4:checkpoints/ethos-v4 \
     --adapter v5:checkpoints/ethos-v5 \
-    --adapter v6:checkpoints/ethos-v4 \
+    --adapter v6:checkpoints/ethos-v6 \
     --out data/heldout_eval.json 2>&1 | tee logs/heldout.log
 
 # --- compare ----------------------------------------------------------------------
 echo "[$(date +%H:%M)] scoring all four on identical calls"
 python3 training/compare_models.py \
-    --model v4:checkpoints/ethos-v4-epoch2 \
+    --model v4:checkpoints/ethos-v4 \
     --model v5:checkpoints/ethos-v5 \
-    --model v6:checkpoints/ethos-v4 \
+    --model v6:checkpoints/ethos-v6 \
     --out data/model_comparison.json 2>&1 | tee logs/compare.log
 
 # --- recordings -------------------------------------------------------------------
 # One call per model, rendered to audio, so the difference can be heard rather than only
 # read off a table.
 echo "[$(date +%H:%M)] recording one call per model"
-for pair in "v4:checkpoints/ethos-v4-epoch2" "v6:checkpoints/ethos-v4" \
+for pair in "v4:checkpoints/ethos-v4" "v6:checkpoints/ethos-v6" \
             "v5:checkpoints/ethos-v5"; do
     name="${pair%%:*}"; adapter="${pair#*:}"
     [ -f "$adapter/adapter_model.safetensors" ] || continue

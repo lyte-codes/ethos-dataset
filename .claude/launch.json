@@ -9,7 +9,7 @@
         "--port",
         "8777",
         "--output",
-        "checkpoints/ethos-v4",
+        "checkpoints/ethos-v6",
         "--log",
         "v4-train.log",
         "--generation-log",
