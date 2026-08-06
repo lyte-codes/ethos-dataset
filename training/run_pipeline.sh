@@ -6,9 +6,9 @@
 #   ./training/run_pipeline.sh --no-publish # train and compare only
 #
 # Builds are published in the order they were actually made — v4, v6, v5, v7 — so the
-# day's ordinals (.1 .2 .3 .4) say when each one came into existence rather than
-# telling a tidier story than what happened. Each release's notes explain where it sits
-# relative to the others.
+# night's letters (a, b, c, d) say when each one came into existence rather than telling
+# a tidier story than what happened. Each release's notes explain where it sits relative
+# to the others.
 #
 # Why that order and not alternating SFT, DPO, SFT, DPO: v4 and v6 are a single
 # supervised run, snapshotted at the end of epoch 2 and again at the end of epoch 3.
@@ -28,6 +28,11 @@ cd "$(dirname "$0")/.."
 
 PREFS=data/ethos_preferences_v2.jsonl
 PUBLISH=1
+
+# Pinned once, at launch. The preference runs finish after midnight, and without this the
+# date would roll over mid-pipeline: one night's four builds would land under two dates with
+# the letter resetting to a partway through.
+BUILD_NIGHT="${BUILD_NIGHT:-$(date +%Y%m%d)}"
 [ "${1:-}" = "--no-publish" ] && PUBLISH=0
 
 # Repeated at the foot of every release, so a build found on its own still explains how
@@ -49,6 +54,7 @@ epoch 3 would have had to start over. Release ordinals follow the order the buil
 actually made."
 
 mkdir -p logs
+echo "[$(date +%H:%M)] build night $BUILD_NIGHT"
 
 train() {
     local name="$1" output="$2"
@@ -77,6 +83,7 @@ publish() {
     fi
     echo "[$(date +%H:%M)] $lineage — publishing"
     python3 training/publish_build.py --adapter "$adapter" --lineage "$lineage" \
+        --date "$BUILD_NIGHT" \
         --notes "$notes
 
 $SHARED_NOTES" 2>&1 | tee -a "logs/publish-${lineage}.log"

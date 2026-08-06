@@ -58,11 +58,25 @@ Semver precedence orders these correctly, which is why the format is worth keepi
 2.1-nightly.20260805a   <   2.1-nightly.20260805b   <   2.1-rc.3   <   2.1
 ```
 
-- **nightly** — `<next-version>-nightly.<YYYYMMDD><letter>`, where the letter counts builds that day from `a`.
+- **nightly** — `<next-version>-nightly.<YYYYMMDD><letter>`, where the letter counts builds that night from `a`.
 - **rc** — `<next-version>-rc.<n>`. A nightly that cleared the full eval suite and is soaking.
 - **stable** — `<major>.<minor>`. Promoted from an rc. Never built directly.
 
-The per-day letter is not decoration. More than one build a day is the normal case, not the
+### The date is the night, not the clock
+
+A full run crosses midnight — the supervised stages finish in the evening and the preference
+stages land in the small hours. The date is pinned when the run starts and every build from
+that run carries it, so `20260805a` through `20260805d` stay one batch.
+
+Letting the clock decide instead would split a single night's builds across two dates and
+reset the letter to `a` partway through, so the third build of a run would read as the first
+build of a new night. Ordering survives either way — `20260805b` sorts before `20260806a` —
+but the grouping is the point: those four builds only mean anything compared against each
+other, and their names should say so.
+
+### Why a letter
+
+The per-night letter is not decoration. More than one build a day is the normal case, not the
 exception — a supervised run and the preference run stacked on top of it finish hours apart on
 the same date, and neither needs a code change between them. Keying on the date alone, or on
 the date plus the commit, would give both the same identifier and two different sets of weights

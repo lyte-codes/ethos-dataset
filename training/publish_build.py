@@ -10,9 +10,15 @@ the repo's history, and map one-to-one onto the build ids in docs/RELEASES.md.
     python3 training/publish_build.py --adapter checkpoints/ethos-v4 --lineage v4 --dry-run
 
 The version is derived, not passed: <target>-nightly.<YYYYMMDD><letter>, where the letter
-counts that day's builds — 20260805a, then b, then c. Two builds on one day would
+counts that night's builds — 20260805a, then b, then c. Two builds on one night would
 otherwise collide, and a build that answers to another build's name breaks everything
 downstream of it.
+
+The date is the night the run started, not the clock time a build finished. An overnight
+pipeline routinely crosses midnight, and letting the date roll over mid-run would split one
+batch of builds across two dates and reset the letter to a partway through — which reads as
+the first build of a new night when it is the third of the same one. Pass --date to pin it;
+run_pipeline.sh does that at launch so every build from one invocation agrees.
 """
 
 from __future__ import annotations
@@ -91,6 +97,9 @@ def main() -> int:
     parser.add_argument("--dataset", default="ethos-booking-v2")
     parser.add_argument("--stage", default="", help="sft or dpo; inferred from the path if absent")
     parser.add_argument("--notes", default="")
+    parser.add_argument("--date", default="",
+                        help="YYYYMMDD of the build night; defaults to today. Pin this for a "
+                             "run that will cross midnight so all its builds share a date.")
     parser.add_argument("--registry", type=Path, default=REGISTRY)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
@@ -101,7 +110,9 @@ def main() -> int:
     if not weights.exists():
         parser.error(f"{weights} not found — is this a finished adapter?")
 
-    day = date.today().strftime("%Y%m%d")
+    day = args.date or date.today().strftime("%Y%m%d")
+    if not re.fullmatch(r"\d{8}", day):
+        parser.error(f"--date must be YYYYMMDD, got {day!r}")
     version = f"{args.target}-nightly.{day}{next_suffix(args.target, day, args.registry)}"
     stage = args.stage or ("dpo" if "dpo" in args.adapter.name or args.lineage in {"v5", "v7"} else "sft")
 
