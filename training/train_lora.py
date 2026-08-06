@@ -115,6 +115,10 @@ def main() -> int:
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--learning-rate", type=float, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument("--resume-from-checkpoint", type=Path, default=None,
+                        help="continue a run from a checkpoint directory. The checkpoint holds "
+                             "optimizer and scheduler state as well as weights, so the run picks "
+                             "up mid-schedule rather than restarting the warmup and decay.")
     args = parser.parse_args()
 
     hyperparameters = Hyperparameters()
@@ -203,7 +207,14 @@ def main() -> int:
         data_collator=DataCollatorForSeq2Seq(tokenizer, padding=True, label_pad_token_id=IGNORE_INDEX),
     )
 
-    trainer.train()
+    resume = str(args.resume_from_checkpoint) if args.resume_from_checkpoint else None
+    if resume:
+        if not args.resume_from_checkpoint.exists():
+            parser.error(f"{args.resume_from_checkpoint} not found")
+        # Everything else — epochs, batch size, learning rate — must match the original run,
+        # or the scheduler resumes onto a curve that was never planned.
+        print(f"resuming from {resume}")
+    trainer.train(resume_from_checkpoint=resume)
     trainer.save_model(str(args.output))
     tokenizer.save_pretrained(str(args.output))
 

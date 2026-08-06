@@ -95,12 +95,21 @@ publish checkpoints/ethos-v4-epoch2 v4 \
 training has not been applied, so nothing in this build penalises repeating a detail
 the brief never contained — expect it to fail that gate."
 
-# --- 2nd: v6, supervised, end of epoch 3 ------------------------------------------
-# The same run as v4, allowed to finish. Published second because it finished second.
+# --- 2nd: v6, supervised, all three epochs ----------------------------------------
+# The supervised run was cut short at step 900 so the machine could be used while it was
+# still evening. Resuming restores optimizer and scheduler state from that checkpoint, so
+# the last 114 steps run on the schedule they were always going to run on rather than a
+# fresh warmup. Only then is this v6.
+train v6-resume checkpoints/ethos-v4/adapter_model.safetensors \
+    python3 training/train_lora.py --data data/ethos_booking_v2.jsonl \
+        --output checkpoints/ethos-v4 --batch-size 1 \
+        --resume-from-checkpoint checkpoints/ethos-v4/checkpoint-900
+
 publish checkpoints/ethos-v4 v6 \
     "Supervised only, all three epochs — the completion of the very run that produced
-v4 at its epoch-2 mark. Same data, same hyperparameters, one more pass. Still no
-preference training."
+v4 at its epoch-2 mark. Same data, same hyperparameters, one more pass. Cut at step 900
+in the evening and resumed to 1014 overnight from optimizer and scheduler state, so the
+learning-rate schedule is unbroken. Still no preference training."
 
 # --- 3rd: v5, preference training on v4 -------------------------------------------
 train v5-dpo checkpoints/ethos-v5/adapter_model.safetensors \
