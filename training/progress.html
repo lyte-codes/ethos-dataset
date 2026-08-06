@@ -163,22 +163,6 @@
     font-size: .78rem; color: var(--muted); line-height: 1.6; max-width: 62ch; margin-top: .4rem;
   }
 
-  .notes { display: flex; flex-direction: column; gap: .75rem; }
-  .note { display: grid; grid-template-columns: auto 1fr; gap: .75rem; align-items: start; font-size: .9rem; }
-
-  .note .flag {
-    font-family: var(--mono); font-size: .62rem; letter-spacing: .1em; text-transform: uppercase;
-    padding: .2rem .45rem; border-radius: 2px; white-space: nowrap; margin-top: .12rem;
-  }
-
-  .flag.watch { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
-  .flag.ok { background: var(--accent-soft); color: var(--accent); }
-
-  .note code {
-    font-family: var(--mono); font-size: .85em; border-radius: 2px; padding: .08em .32em;
-    background: color-mix(in srgb, var(--text) 7%, transparent);
-  }
-
   footer {
     font-family: var(--mono); font-size: .7rem; color: var(--muted); line-height: 1.7;
     border-top: 1px solid var(--edge); padding-top: 1rem;
@@ -274,8 +258,6 @@
       loss is the better model, whatever the training losses say.
     </p>
   </section>
-
-  <section class="card notes" id="notes"></section>
 
   <section class="card pipe" id="pipeline">
     <div class="prog-head">
@@ -410,87 +392,6 @@ function drawGN(d) {
   });
 }
 
-function renderNotes(d) {
-  const notes = el("notes");
-  notes.replaceChildren();
-  if (d.stage === "generation" && !d.log.length) {
-    const label = document.createElement("div");
-    label.className = "label";
-    label.textContent = "Flags";
-    notes.appendChild(label);
-    const g = d.generation || {};
-    const healthy = (g.pass_rate ?? 1) >= 0.8;
-    const note = document.createElement("div");
-    note.className = "note";
-    note.innerHTML =
-      `<span class="flag ${healthy ? "ok" : "watch"}">${healthy ? "Healthy" : "Watch"}</span>` +
-      `<div>The quality gate is admitting <strong>${((g.pass_rate ?? 0) * 100).toFixed(0)}%</strong> ` +
-      `of generated calls. A falling rate means the generator is drifting off the outbound role, ` +
-      `not that it has slowed down.</div>`;
-    notes.appendChild(note);
-    return;
-  }
-  const label = document.createElement("div");
-  label.className = "label";
-  label.textContent = "Flags";
-  notes.appendChild(label);
-
-  const spikes = d.log.filter(e => e.gn != null && e.gn > 10);
-  const losses = d.log.filter(e => e.loss != null);
-  const items = [];
-
-  if (spikes.length) {
-    const worst = spikes.reduce((a, b) => (b.gn > a.gn ? b : a));
-    items.push(["watch",
-      `<strong>${spikes.length} gradient-norm spike${spikes.length > 1 ? "s" : ""}, peaking at ${worst.gn.toLocaleString(undefined, { maximumFractionDigits: 0 })} at step ${worst.step}</strong>
-       against a baseline near 2. These are pre-clip readings —
-       ${d.max_grad_norm ? `<code>max_grad_norm=${d.max_grad_norm}</code> is active, so each update was rescaled before it reached the weights.` : "check whether gradient clipping is enabled."}`]);
-  }
-
-  if (losses.length >= 2) {
-    const firstLoss = losses[0].loss, lastLoss = losses.at(-1).loss;
-    const recent = losses.slice(-5).map(e => e.loss);
-    const falling = lastLoss <= firstLoss;
-    items.push([falling ? "ok" : "watch",
-      `Loss <strong>${firstLoss.toFixed(2)} → ${lastLoss.toFixed(3)}</strong> over ${losses.at(-1).step} steps.
-       Last five readings: ${recent.map(v => v.toFixed(3)).join(", ")}.`]);
-  }
-
-  // Loss falling in steps at epoch boundaries, rather than continuously, is what
-  // memorisation looks like from the outside. Worth surfacing, because in-loop eval is
-  // off on MPS so training loss is the only signal here — and it cannot tell the
-  // difference on its own.
-  const epochs = d.epochs || 3;
-  const perEpoch = (d.max_steps || 1) / epochs;
-  const means = [];
-  for (let e = 0; e < epochs; e++) {
-    const inEpoch = losses.filter(x => x.step > perEpoch * e && x.step <= perEpoch * (e + 1));
-    if (inEpoch.length >= 3) {
-      means.push({ epoch: e + 1, mean: inEpoch.reduce((a, b) => a + b.loss, 0) / inEpoch.length });
-    }
-  }
-  if (means.length >= 2) {
-    const drops = means.slice(1).map((m, i) => means[i].mean - m.mean);
-    const biggest = Math.max(...drops);
-    const summary = means.map(m => `epoch ${m.epoch}: ${m.mean.toFixed(2)}`).join(" · ");
-    items.push([biggest > 0.2 ? "watch" : "ok",
-      biggest > 0.2
-        ? `<strong>Loss is stepping down at epoch boundaries</strong> (${summary}). A drop that
-           lands on the boundary rather than spreading across it is what memorising looks like
-           from outside. Training loss cannot settle it — the held-out comparison between the
-           two-epoch and three-epoch builds can.`
-        : `Loss is descending smoothly across epochs (${summary}), with no step at the
-           boundaries — consistent with learning rather than memorising.`]);
-  }
-
-  for (const [flag, html] of items) {
-    const note = document.createElement("div");
-    note.className = "note";
-    note.innerHTML = `<span class="flag ${flag}"></span><div>${html}</div>`;
-    note.querySelector(".flag").textContent = flag === "watch" ? "Watch" : "Healthy";
-    notes.appendChild(note);
-  }
-}
 
 function renderGeneration(d) {
   const g = d.generation;
@@ -601,7 +502,6 @@ function render(d) {
   // started, so they stay out of the layout until there is something to plot.
   const hasMetrics = d.log.length > 0;
   el("charts").hidden = !hasMetrics;
-  el("notes").hidden = !hasMetrics && d.stage !== "generation";
   renderGeneration(d);
   renderPipeline(d);
   const maxSteps = d.max_steps || 1;
@@ -667,7 +567,6 @@ function render(d) {
     drawLoss(d);
     drawGN(d);
   }
-  renderNotes(d);
 }
 
 function markFreshness() {
