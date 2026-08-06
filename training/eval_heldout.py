@@ -35,13 +35,16 @@ from train_lora import (BASE_MODEL, IGNORE_INDEX, Hyperparameters, build_tokeniz
                         load_examples, split_by_conversation)
 
 
-def mean_loss(model, tokenizer, examples: list[dict], device: str, max_length: int) -> float:
+def mean_loss(model, tokenizer, examples: list[dict], device: str, max_length: int,
+              label: str = "") -> float:
     """Average per-token loss over the assistant turns, which is what training optimised."""
     tokenize = build_tokenize_fn(tokenizer, max_length)
     total_loss, total_tokens = 0.0, 0
 
     with torch.no_grad():
-        for example in examples:
+        for index, example in enumerate(examples, 1):
+            if label and index % 25 == 0:
+                print(f"    {label}: {index}/{len(examples)}", flush=True)
             encoded = tokenize(example)
             input_ids = torch.tensor([encoded["input_ids"]], device=device)
             labels = torch.tensor([encoded["labels"]], device=device)
@@ -79,8 +82,10 @@ def main() -> int:
 
     examples = load_examples(args.data)
     train_examples, held_out = split_by_conversation(examples, args.eval_fraction, args.seed)
+    # flush on every print: redirected output block-buffers otherwise, and a long scoring
+    # run then shows nothing at all until it exits, which is indistinguishable from a hang.
     print(f"{len(held_out)} held-out examples, {len(train_examples)} training "
-          f"(scoring {min(args.train_sample, len(train_examples))} of them)\n")
+          f"(scoring {min(args.train_sample, len(train_examples))} of them)\n", flush=True)
 
     max_length = Hyperparameters().max_sequence_length
     seen = train_examples[:args.train_sample]
@@ -101,15 +106,16 @@ def main() -> int:
             model = PeftModel.from_pretrained(model, str(adapter))
         model.to(device).eval()
 
-        train_loss = mean_loss(model, tokenizer, seen, device, max_length)
-        held_loss = mean_loss(model, tokenizer, held_out, device, max_length)
+        print(f"  scoring {name}…", flush=True)
+        train_loss = mean_loss(model, tokenizer, seen, device, max_length, f"{name} train")
+        held_loss = mean_loss(model, tokenizer, held_out, device, max_length, f"{name} held-out")
         results[name] = {
             "train_loss": round(train_loss, 4),
             "heldout_loss": round(held_loss, 4),
             "gap": round(held_loss - train_loss, 4),
         }
         print(f"{name:>6}  train {train_loss:.3f}  held-out {held_loss:.3f}  "
-              f"gap {held_loss - train_loss:+.3f}")
+              f"gap {held_loss - train_loss:+.3f}", flush=True)
         del model
 
     print()

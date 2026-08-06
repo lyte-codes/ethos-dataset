@@ -56,6 +56,14 @@ actually made."
 mkdir -p logs
 echo "[$(date +%H:%M)] build night $BUILD_NIGHT"
 
+# The comparison drives a live model for the business side of each call, so ollama has to
+# be up. Started here rather than assumed, since the machine was cleared to free memory.
+if ! curl -s --max-time 5 http://localhost:11434/api/tags > /dev/null 2>&1; then
+    echo "[$(date +%H:%M)] starting ollama"
+    OLLAMA_NUM_PARALLEL=2 OLLAMA_MAX_LOADED_MODELS=1 nohup ollama serve > logs/ollama.log 2>&1 &
+    sleep 8
+fi
+
 train() {
     local name="$1" output="$2"
     shift 2
@@ -96,20 +104,20 @@ training has not been applied, so nothing in this build penalises repeating a de
 the brief never contained — expect it to fail that gate."
 
 # --- 2nd: v6, supervised, all three epochs ----------------------------------------
-# The supervised run was cut short at step 900 so the machine could be used while it was
+# The supervised run was cut short at step 850 so the machine could be used while it was
 # still evening. Resuming restores optimizer and scheduler state from that checkpoint, so
-# the last 114 steps run on the schedule they were always going to run on rather than a
+# the last 164 steps run on the schedule they were always going to run on rather than a
 # fresh warmup. Only then is this v6.
 train v6-resume checkpoints/ethos-v4/adapter_model.safetensors \
     python3 training/train_lora.py --data data/ethos_booking_v2.jsonl \
         --output checkpoints/ethos-v4 --batch-size 1 \
-        --resume-from-checkpoint checkpoints/ethos-v4/checkpoint-900
+        --resume-from-checkpoint checkpoints/ethos-v4/checkpoint-850
 
 publish checkpoints/ethos-v4 v6 \
     "Supervised only, all three epochs — the completion of the very run that produced
 v4 at its epoch-2 mark. Same data, same hyperparameters, one more pass. Cut at step 900
-in the evening and resumed to 1014 overnight from optimizer and scheduler state, so the
-learning-rate schedule is unbroken. Still no preference training."
+at step 850 in the evening and resumed to 1014 overnight from optimizer and scheduler
+state, so the learning-rate schedule is unbroken. Still no preference training."
 
 # --- 3rd: v5, preference training on v4 -------------------------------------------
 train v5-dpo checkpoints/ethos-v5/adapter_model.safetensors \
@@ -150,5 +158,21 @@ python3 training/compare_models.py \
     --model v6:checkpoints/ethos-v4 \
     --model v7:checkpoints/ethos-v7 \
     --out data/model_comparison.json 2>&1 | tee logs/compare.log
+
+# --- recordings -------------------------------------------------------------------
+# One call per model, rendered to audio, so the difference can be heard rather than only
+# read off a table.
+echo "[$(date +%H:%M)] recording one call per model"
+for pair in "v4:checkpoints/ethos-v4-epoch2" "v6:checkpoints/ethos-v4" \
+            "v5:checkpoints/ethos-v5" "v7:checkpoints/ethos-v7"; do
+    name="${pair%%:*}"; adapter="${pair#*:}"
+    [ -f "$adapter/adapter_model.safetensors" ] || continue
+    [ -f "data/audio/${name}-call.mp3" ] && continue
+    python3 training/fake_call.py --adapter "$adapter" -n 1 \
+        --out "data/calls-${name}.json" > "logs/call-${name}.log" 2>&1 \
+        && python3 training/render_call_audio.py --calls "data/calls-${name}.json" \
+            --out-dir data/audio >> "logs/call-${name}.log" 2>&1 \
+        && echo "[$(date +%H:%M)] recorded $name"
+done
 
 echo "[$(date +%H:%M)] pipeline finished"
