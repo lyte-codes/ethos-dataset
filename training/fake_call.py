@@ -159,8 +159,11 @@ def load_agent(base_model: str, adapter: Path | None, device_preference: str):
         device = device_preference
 
     tokenizer = AutoTokenizer.from_pretrained(base_model)
+    # bf16 everywhere but CPU. Half precision was validated against fp32 on the eval
+    # side (loss agreed to within 0.008), and inference holds no optimizer state that
+    # could care — fp32 here was 3.1GB spent on nothing.
     model = AutoModelForCausalLM.from_pretrained(
-        base_model, dtype=torch.bfloat16 if device == "cuda" else torch.float32
+        base_model, dtype=torch.float32 if device == "cpu" else torch.bfloat16
     )
     if adapter is not None:
         from peft import PeftModel

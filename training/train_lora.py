@@ -177,11 +177,15 @@ def main() -> int:
         tokenize, remove_columns=Dataset.from_list(eval_examples).column_names
     )
 
-    # bf16 only pays off on CUDA. MPS trains more reliably in fp32, and a 1.5B model
-    # in fp32 still fits comfortably in unified memory.
+    # bf16 base weights, fp32 trainable adapter — the frozen 1.5B does not need training
+    # precision, and fp32 for it measured 6.2GB against a 16GB ceiling shared with
+    # activations, the OS and everything else. "Fits comfortably" was true of the model
+    # alone and false of the machine: the v4/v6 run spent its final hours in swap at
+    # 35s/step. The trainable parameters are promoted back to fp32 below, so optimizer
+    # updates keep the small steps late training consists of.
     model = AutoModelForCausalLM.from_pretrained(
         args.base_model,
-        dtype=torch.bfloat16 if device == "cuda" else torch.float32,
+        dtype=torch.float32 if device == "cpu" else torch.bfloat16,
     )
     model.config.use_cache = False
 
@@ -194,6 +198,10 @@ def main() -> int:
         task_type="CAUSAL_LM",
     )
     model = get_peft_model(model, lora_config)
+    if device != "cpu":
+        for parameter in model.parameters():
+            if parameter.requires_grad:
+                parameter.data = parameter.data.to(torch.float32)
     model.print_trainable_parameters()
     # Recompute activations during backward instead of storing all of them. On a
     # 16GB unified-memory machine, storing full activations for a 1.5B model at

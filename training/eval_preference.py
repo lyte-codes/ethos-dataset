@@ -65,9 +65,18 @@ def response_logprob(model, tokenizer, messages: list[dict], response: str,
 
     # Per token, so a longer response is not penalised for being longer. The pairs differ
     # by a few tokens, but not always by the same number of them.
-    logprobs = torch.log_softmax(logits[0, :-1].float(), dim=-1)
+    #
+    # Chunked: log_softmax over the whole sequence materialises two fp32 tensors of
+    # seq x 152k vocab (~470MB each at 768 tokens) for one column of answers. Working in
+    # 64-position slices keeps the peak under 40MB with identical results.
     targets = input_ids[0, 1:]
-    chosen = logprobs.gather(1, targets.unsqueeze(1)).squeeze(1)
+    rows = logits[0, :-1]
+    pieces = []
+    for start in range(0, rows.shape[0], 64):
+        block = rows[start:start + 64].float()
+        piece = block.gather(1, targets[start:start + 64].unsqueeze(1)).squeeze(1)
+        pieces.append(piece - torch.logsumexp(block, dim=-1))
+    chosen = torch.cat(pieces)
     response_part = chosen[len(prompt_ids) - 1:]
     return float(response_part.mean())
 

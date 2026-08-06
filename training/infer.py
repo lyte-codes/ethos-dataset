@@ -36,7 +36,7 @@ def main() -> int:
     device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
     tokenizer = AutoTokenizer.from_pretrained(args.base_model)
     model = AutoModelForCausalLM.from_pretrained(
-        args.base_model, torch_dtype=torch.bfloat16 if device != "cpu" else torch.float32
+        args.base_model, dtype=torch.float32 if device == "cpu" else torch.bfloat16
     )
     if not args.base_only:
         model = PeftModel.from_pretrained(model, str(args.adapter))

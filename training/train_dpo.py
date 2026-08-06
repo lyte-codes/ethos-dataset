@@ -35,7 +35,11 @@ class Hyperparameters:
     gradient_accumulation_steps: int = 8
     # TRL 1.x truncates the whole prompt-plus-response sequence with one budget and drops
     # the oldest turns first, so a separate prompt budget no longer exists to set.
-    max_length: int = 768          # longest example in v2 is 789 tokens; almost nothing truncates
+    # 512 covers the conversation tail that decides the pair; keep_end truncation drops only
+    # the oldest turns of the longest calls. Activation memory scales with length squared in
+    # attention, so 768 -> 512 is a ~2.2x cut in the term that was driving the machine into
+    # swap — measured 10s/item at 768 under pressure, and the run before it died the same way.
+    max_length: int = 512
     truncation_mode: str = "keep_end"
     precompute_ref_log_probs: bool = True
     warmup_ratio: float = 0.1
