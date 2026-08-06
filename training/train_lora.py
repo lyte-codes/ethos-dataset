@@ -121,9 +121,10 @@ def main() -> int:
     parser.add_argument("--grad-accum", type=int, default=None)
     parser.add_argument("--target-modules", default=None,
                         help="comma-separated projection names to adapt")
-    parser.add_argument("--limit", type=int, default=None,
-                        help="train on only the first N examples — for cheap proxy runs "
-                             "during a hyperparameter search, not for a real build")
+    parser.add_argument("--limit-conversations", type=int, default=None,
+                        help="train on only the first N conversations — for cheap rungs during "
+                             "a hyperparameter search, not for a real build. Whole conversations "
+                             "rather than examples, so a rung never holds half a call.")
     parser.add_argument("--resume-from-checkpoint", type=Path, default=None,
                         help="continue a run from a checkpoint directory. The checkpoint holds "
                              "optimizer and scheduler state as well as weights, so the run picks "
@@ -156,10 +157,12 @@ def main() -> int:
         tokenizer.pad_token = tokenizer.eos_token
 
     examples = load_examples(args.data)
-    if args.limit:
-        # Truncate before splitting, so the held-out conversations still come from the
-        # examples actually being trained on rather than from data this run never sees.
-        examples = examples[:args.limit]
+    if args.limit_conversations:
+        # Whole conversations, and the first N by id so every rung is a superset of the one
+        # below it. A rung that sampled differently would mix "this configuration is better"
+        # with "this configuration got easier data".
+        keep = sorted({e["conversation_id"] for e in examples})[:args.limit_conversations]
+        examples = [e for e in examples if e["conversation_id"] in set(keep)]
     train_examples, eval_examples = split_by_conversation(
         examples, args.eval_fraction, args.seed
     )
