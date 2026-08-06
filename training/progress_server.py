@@ -180,7 +180,7 @@ def pipeline_stages(sft: dict) -> list[dict]:
     stages = []
 
     stages.append({
-        "key": "v4", "label": "v4 — supervised, epoch 2", "release": "nightly …a",
+        "key": "v4", "label": "v4 — supervised, epoch 2", "release": "build.1",
         "state": "done" if v4_done else "running" if sft_running else "waiting",
         "eta": None if v4_done else seconds_to(epoch_two_step),
         "estimated": False, "confidence": "measured",
@@ -188,7 +188,7 @@ def pipeline_stages(sft: dict) -> list[dict]:
     })
 
     stages.append({
-        "key": "v6", "label": "v6 — supervised, epoch 3", "release": "nightly …b",
+        "key": "v6", "label": "v6 — supervised, epoch 3", "release": "build.2",
         "state": "done" if v6_done else "running" if sft_running else "waiting",
         "eta": None if v6_done else seconds_to(total),
         "estimated": False, "confidence": "measured",
@@ -220,7 +220,7 @@ def pipeline_stages(sft: dict) -> list[dict]:
         per_run, confidence = (rate or 0) * multiplier * dpo_steps, "guess"
 
     pending = 0.0
-    for key, release, base in [("v5", "nightly …c", "v4"), ("v7", "nightly …d", "v6")]:
+    for key, release, base in [("v5", "build.3", "v4")]:
         done = Path(f"checkpoints/ethos-{key}/adapter_model.safetensors").exists()
         live = live_runs[key]
         if done:

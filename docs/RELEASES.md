@@ -16,12 +16,12 @@ tweak and for a total change of what the agent does.
 ```
 lineage        dataset ethos-booking-v2  ->  model v7            immutable, internal
                                               |
-release        2.1-nightly.20260805b                           immutable, published
+release        0.1-build.3                                       immutable, published
                                               |
-channel        nightly -> beta -> stable                         mutable pointers
+channel        dev -> beta -> stable                              mutable pointers
 ```
 
-**Builds are immutable.** Once `2.1-nightly.20260805b` exists it is never rebuilt or
+**Builds are immutable.** Once `0.1-build.3` exists it is never rebuilt or
 overwritten. If it is wrong, it is superseded, never edited.
 
 **Channels are pointers.** `stable` is a name for whichever build is currently shipped, the way
@@ -55,43 +55,24 @@ Minor goes up; that is the whole scheme.
 Semver precedence orders these correctly, which is why the format is worth keeping to:
 
 ```
-2.1-nightly.20260805a   <   2.1-nightly.20260805b   <   2.1-rc.3   <   2.1
+0.1-build.7   <   0.1-build.12   <   0.1-rc.1   <   0.1
 ```
 
-- **nightly** — `<next-version>-nightly.<YYYYMMDD><letter>`, where the letter counts builds that night from `a`.
-- **rc** — `<next-version>-rc.<n>`. A nightly that cleared the full eval suite and is soaking.
+- **build** — `<next-version>-build.<n>`, counting every build ever made toward that version.
+- **rc** — `<next-version>-rc.<n>`. A build that cleared the full eval suite and is soaking.
 - **stable** — `<major>.<minor>`. Promoted from an rc. Never built directly.
 
-### The date is the night, not the clock
+The counter carries no date, and that is the point. Dates only group builds usefully if
+building happens on a schedule. Building here is sporadic — a burst of four in one night,
+then nothing for a week — so a date in the version invents a grouping that means nothing
+while bringing real problems with it. A run that crosses midnight splits one batch across two
+dates and restarts the within-day counter partway through, which reads as the first build of
+a new day when it is the third of the same batch. Containing that took a pinned date, then a
+pin that survived a restart, then a marker file. A plain counter needs none of it.
 
-A full run crosses midnight — the supervised stages finish in the evening and the preference
-stages land in the small hours. The date is pinned when the run starts and every build from
-that run carries it, so `20260805a` through `20260805d` stay one batch.
-
-Letting the clock decide instead would split a single night's builds across two dates and
-reset the letter to `a` partway through, so the third build of a run would read as the first
-build of a new night. Ordering survives either way — `20260805b` sorts before `20260806a` —
-but the grouping is the point: those four builds only mean anything compared against each
-other, and their names should say so.
-
-### Why a letter
-
-The per-night letter is not decoration. More than one build a day is the normal case, not the
-exception — a supervised run and the preference run stacked on top of it finish hours apart on
-the same date, and neither needs a code change between them. Keying on the date alone, or on
-the date plus the commit, would give both the same identifier and two different sets of weights
-would answer to one name. Alphanumeric prerelease identifiers compare lexically, so `a` before
-`b` before `c` orders the day's builds correctly, which a git sha never could. Past `z` it
-continues `aa`, `ab`, the way spreadsheet columns do — though twenty-six builds in a day is far
-beyond what one machine can train.
-
-The commit and the training stage are recorded in the registry rather than the version string.
-They are worth knowing, but they are not what makes a build unique, and a version number that
-carries every useful fact stops being a name and becomes a description.
-
-A nightly carries the version it is *heading toward*. Most days that is the next minor:
-running against a shipped 2.0 produces `2.1-nightly.…`. If the role changed, it is
-`3.0-nightly.…` from the first run after the change.
+Numeric identifiers compare numerically under semver, so `build.9` sorts before `build.12`
+where a string comparison would not. When a build was made is in the registry, where it is a
+fact about the build rather than part of its name.
 
 ---
 
@@ -99,11 +80,11 @@ running against a shipped 2.0 produces `2.1-nightly.…`. If the role changed, i
 
 | Channel | Points at | Who consumes it | Retention |
 |---|---|---|---|
-| `nightly` | Latest passing nightly build | You, and the eval harness | Last 14 |
+| `dev` | Latest passing build | You, and the eval harness | Last 14 |
 | `beta` | Current release candidate | Opt-in users, staging | All rcs of the current release |
 | `stable` | Currently shipped build | Production, default for every client | Every stable, forever |
 
-Production never resolves `nightly`. Clients either pin `stable` or pin an exact version;
+Production never resolves `dev`. Clients either pin `stable` or pin an exact version;
 pinning exact is the right default for anyone who cares about reproducibility, and `stable`
 is right for anyone who wants fixes automatically.
 
@@ -145,7 +126,7 @@ unevaluated.
 2. **Train** from the current base, writing `hyperparameters.json` and the dataset hash into
    the checkpoint.
 3. **Evaluate** against the regression set (below). Fail the run on any hard gate.
-4. **Publish** as `…-nightly.<date><letter>` and repoint the `nightly` channel.
+4. **Publish** as `…-build.<n>` and repoint the `dev` channel.
 5. **Record** the build in the registry with everything needed to rebuild it.
 
 Because nightlies are immutable and cheap to keep, a regression that appears on the 12th is
@@ -159,7 +140,7 @@ A build only moves up a channel by clearing the gate below it. These are the met
 matter for an agent that phones a business on your behalf — the costly failure is not an
 awkward sentence, it is confidently stating a phone number nobody gave it.
 
-| Gate | nightly | beta | stable |
+| Gate | dev | beta | stable |
 |---|---|---|---|
 | Invented caller detail (phone, name, date, time) on the regression set | 0 | 0 | 0 |
 | No regression against the current `stable` on any blocking metric | — | required | required |
@@ -169,7 +150,7 @@ awkward sentence, it is confidently stating a phone number nobody gave it.
 | Soak time on the channel below | — | — | ≥ 3 days |
 | Human review of 10 sampled calls | — | — | required |
 
-Invented details are a **hard zero at every level**, including nightly. That is the whole
+Invented details are a **hard zero at every level**, including dev. That is the whole
 reason the preference-training stage exists, and a build that regresses on it should never
 reach a channel anyone can resolve.
 
@@ -215,17 +196,17 @@ One row per build, append-only, never edited:
 
 ```json
 {
-  "version": "2.1-nightly.20260805b",
-  "channel": "nightly",
+  "version": "0.1-build.3",
+  "channel": "dev",
   "created": "2026-08-05T03:14:00Z",
   "lineage": { "model": "v7", "dataset": "ethos-booking-v2" },
   "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
   "adapter_sha256": "…",
   "dataset_sha256": "…",
   "code_sha": "a3f9c21",
-  "training": { "stage": "dpo", "from": "2.1-nightly.20260805a", "hyperparameters": "…" },
+  "training": { "stage": "dpo", "from": "0.1-build.2", "hyperparameters": "…" },
   "eval": { "invented_details": 0, "completion_rate": 0.94, "readback_verified": 0.88 },
-  "supersedes": "2.1-nightly.20260805a"
+  "supersedes": "0.1-build.2"
 }
 ```
 

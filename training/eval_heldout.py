@@ -73,6 +73,10 @@ def main() -> int:
     parser.add_argument("--train-sample", type=int, default=120,
                         help="how many training examples to score for the comparison")
     parser.add_argument("--out", type=Path, default=Path("data/heldout_eval.json"))
+    parser.add_argument("--dtype", default="bfloat16", choices=["bfloat16", "float32"],
+                        help="scoring computes no gradients, so half precision halves the "
+                             "memory for a loss difference far below what is being measured. "
+                             "Every model in one comparison must use the same setting.")
     args = parser.parse_args()
 
     device = ("cuda" if torch.cuda.is_available()
@@ -100,7 +104,8 @@ def main() -> int:
             continue
 
         model = AutoModelForCausalLM.from_pretrained(
-            args.base_model, dtype=torch.bfloat16 if device == "cuda" else torch.float32)
+            args.base_model,
+            dtype=torch.bfloat16 if args.dtype == "bfloat16" else torch.float32)
         if adapter is not None:
             from peft import PeftModel
 

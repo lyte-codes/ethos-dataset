@@ -5,10 +5,8 @@
 #   ./training/run_pipeline.sh              # train, publish, compare
 #   ./training/run_pipeline.sh --no-publish # train and compare only
 #
-# Builds are published in the order they were actually made — v4, v6, v5, v7 — so the
-# night's letters (a, b, c, d) say when each one came into existence rather than telling
-# a tidier story than what happened. Each release's notes explain where it sits relative
-# to the others.
+# Builds are published in the order they were actually made, and numbered by a plain
+# counter. Each release's notes explain where it sits relative to the others.
 #
 # Why that order and not alternating SFT, DPO, SFT, DPO: v4 and v6 are a single
 # supervised run, snapshotted at the end of epoch 2 and again at the end of epoch 3.
@@ -29,43 +27,26 @@ cd "$(dirname "$0")/.."
 PREFS=data/ethos_preferences_v2.jsonl
 PUBLISH=1
 
-# Pinned once per night and remembered on disk. Pinning it at launch is not enough: a
-# pipeline restarted after midnight — to pick up a fixed bug, say — recomputes the date and
-# publishes the rest of the night's builds under tomorrow, which is the exact split the pin
-# exists to prevent. The marker is written on the first run and reused by every later one,
-# and only a night with no builds yet starts a new date.
-NIGHT_FILE=logs/build-night
-if [ -n "${BUILD_NIGHT:-}" ]; then
-    :
-elif [ -s "$NIGHT_FILE" ]; then
-    BUILD_NIGHT=$(cat "$NIGHT_FILE")
-    echo "[$(date +%H:%M)] reusing build night $BUILD_NIGHT from $NIGHT_FILE"
-else
-    BUILD_NIGHT=$(date +%Y%m%d)
-fi
 [ "${1:-}" = "--no-publish" ] && PUBLISH=0
 
 # Repeated at the foot of every release, so a build found on its own still explains how
 # it relates to the other three.
-SHARED_NOTES="**How the four builds relate**
+SHARED_NOTES="**How the builds relate**
 
-\`v4\` and \`v6\` are the same supervised run: v4 is its state at the end of epoch 2, v6 at
-the end of epoch 3. \`v5\` is v4 with preference training applied, \`v7\` is v6 with the same
-preference training applied. Nothing else differs within either pair.
+\`v4\` and \`v6\` are the same supervised run: v4 is its state at the end of epoch 2, v6 at the
+end of epoch 3. \`v5\` is v4 with preference training applied. Nothing else differs within
+either pair.
 
-That gives two independent comparisons. \`v4\` against \`v6\` isolates the third epoch, with
-the preference stage held constant at none. \`v4\` against \`v5\` — and \`v6\` against \`v7\` —
-isolates the preference training, with the supervised model held constant.
+\`v4\` against \`v6\` isolates the third epoch. It measured worse — held-out loss 1.516 against
+v4's 1.342, on 68 conversations neither model was trained on, despite v6 having the lower
+training loss. The third epoch memorised rather than generalised.
 
-They were built supervised-then-supervised, preference-then-preference, rather than
-alternating. Alternating would have meant stopping the supervised run after epoch 2 to
-train a preference model and then resuming it, and the training script cannot resume, so
-epoch 3 would have had to start over. Release ordinals follow the order the builds were
-actually made."
+\`v4\` against \`v5\` isolates the preference training, with the supervised model held constant.
+
+A fourth build, preference training on v6, is deliberately absent: it would have cost hours to
+answer a question about the weaker of the two supervised models."
 
 mkdir -p logs
-printf '%s' "$BUILD_NIGHT" > "$NIGHT_FILE"
-echo "[$(date +%H:%M)] build night $BUILD_NIGHT"
 
 # The comparison drives a live model for the business side of each call, so ollama has to
 # be up. Started here rather than assumed, since the machine was cleared to free memory.
@@ -102,7 +83,6 @@ publish() {
     fi
     echo "[$(date +%H:%M)] $lineage — publishing"
     python3 training/publish_build.py --adapter "$adapter" --lineage "$lineage" \
-        --date "$BUILD_NIGHT" \
         --notes "$notes
 
 $SHARED_NOTES" 2>&1 | tee -a "logs/publish-${lineage}.log"
@@ -140,14 +120,10 @@ publish checkpoints/ethos-v5 v5 \
 v6 came out of one continuous supervised run that was left to finish before any
 preference training began."
 
-# --- 4th: v7, preference training on v6 -------------------------------------------
-train v7-dpo checkpoints/ethos-v7/adapter_model.safetensors \
-    python3 training/train_dpo.py --data "$PREFS" \
-        --sft-adapter checkpoints/ethos-v4 --output checkpoints/ethos-v7 --batch-size 1
-
-publish checkpoints/ethos-v7 v7 \
-    "Preference training applied to v6 — the same preference data and settings used for
-v5, over the three-epoch supervised model instead of the two-epoch one."
+# v7 — preference training on v6 — is deliberately not built. v6 measured worse than v4 on
+# held-out loss (1.516 against 1.342), so it is the weaker supervised model, and preference
+# training on top of it would cost hours to answer a question about a model that would never
+# be shipped.
 
 # --- measure generalisation -------------------------------------------------------
 # Behaviour on five calls is coarse. This is the direct test of whether the extra epoch
@@ -158,7 +134,6 @@ python3 training/eval_heldout.py \
     --adapter v4:checkpoints/ethos-v4-epoch2 \
     --adapter v5:checkpoints/ethos-v5 \
     --adapter v6:checkpoints/ethos-v4 \
-    --adapter v7:checkpoints/ethos-v7 \
     --out data/heldout_eval.json 2>&1 | tee logs/heldout.log
 
 # --- compare ----------------------------------------------------------------------
@@ -167,7 +142,6 @@ python3 training/compare_models.py \
     --model v4:checkpoints/ethos-v4-epoch2 \
     --model v5:checkpoints/ethos-v5 \
     --model v6:checkpoints/ethos-v4 \
-    --model v7:checkpoints/ethos-v7 \
     --out data/model_comparison.json 2>&1 | tee logs/compare.log
 
 # --- recordings -------------------------------------------------------------------
@@ -175,7 +149,7 @@ python3 training/compare_models.py \
 # read off a table.
 echo "[$(date +%H:%M)] recording one call per model"
 for pair in "v4:checkpoints/ethos-v4-epoch2" "v6:checkpoints/ethos-v4" \
-            "v5:checkpoints/ethos-v5" "v7:checkpoints/ethos-v7"; do
+            "v5:checkpoints/ethos-v5"; do
     name="${pair%%:*}"; adapter="${pair#*:}"
     [ -f "$adapter/adapter_model.safetensors" ] || continue
     [ -f "data/audio/${name}-call.mp3" ] && continue

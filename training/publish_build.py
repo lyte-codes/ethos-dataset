@@ -9,16 +9,16 @@ the repo's history, and map one-to-one onto the build ids in docs/RELEASES.md.
     python3 training/publish_build.py --adapter checkpoints/ethos-v4 --lineage v4
     python3 training/publish_build.py --adapter checkpoints/ethos-v4 --lineage v4 --dry-run
 
-The version is derived, not passed: <target>-nightly.<YYYYMMDD><letter>, where the letter
-counts that night's builds — 20260805a, then b, then c. Two builds on one night would
-otherwise collide, and a build that answers to another build's name breaks everything
-downstream of it.
+The version is derived, not passed: <target>-build.<n>, counting every build ever made
+toward that target. Two builds cannot collide, and a build that answers to another build's
+name breaks everything downstream of it.
 
-The date is the night the run started, not the clock time a build finished. An overnight
-pipeline routinely crosses midnight, and letting the date roll over mid-run would split one
-batch of builds across two dates and reset the letter to a partway through — which reads as
-the first build of a new night when it is the third of the same one. Pass --date to pin it;
-run_pipeline.sh does that at launch so every build from one invocation agrees.
+The counter deliberately carries no date. Dates only group builds usefully if building
+happens on a schedule; when it happens sporadically, a date in the version invents a
+grouping that means nothing and brings real problems with it — a run crossing midnight
+splits one batch across two dates, which took three separate fixes to contain before the
+scheme was abandoned. When each build was made is recorded in the registry, where it is a
+fact about the build rather than part of its name.
 """
 
 from __future__ import annotations
@@ -57,35 +57,18 @@ def dirty_tree() -> bool:
     return bool(result.stdout.strip())
 
 
-def suffix_for(index: int) -> str:
-    """0 -> a, 25 -> z, 26 -> aa. Spreadsheet columns, for the same reason they use them."""
-    letters = ""
-    index += 1
-    while index:
-        index, remainder = divmod(index - 1, 26)
-        letters = chr(ord("a") + remainder) + letters
-    return letters
-
-
-def index_of(suffix: str) -> int:
-    value = 0
-    for character in suffix:
-        value = value * 26 + (ord(character) - ord("a") + 1)
-    return value - 1
-
-
-def next_suffix(target: str, day: str, registry: Path) -> str:
-    """Builds already published today decide this one's letter."""
+def next_build_number(target: str, registry: Path) -> int:
+    """Every build ever published toward this target decides the next number."""
     if not registry.exists():
-        return suffix_for(0)
-    pattern = re.compile(rf"^{re.escape(target)}-nightly\.{day}([a-z]+)$")
-    highest = -1
+        return 1
+    pattern = re.compile(rf"^{re.escape(target)}-build\.(\d+)$")
+    highest = 0
     with registry.open(encoding="utf-8") as handle:
         for line in handle:
             match = pattern.match(json.loads(line).get("version", ""))
             if match:
-                highest = max(highest, index_of(match.group(1)))
-    return suffix_for(highest + 1)
+                highest = max(highest, int(match.group(1)))
+    return highest + 1
 
 
 def main() -> int:
@@ -97,9 +80,6 @@ def main() -> int:
     parser.add_argument("--dataset", default="ethos-booking-v2")
     parser.add_argument("--stage", default="", help="sft or dpo; inferred from the path if absent")
     parser.add_argument("--notes", default="")
-    parser.add_argument("--date", default="",
-                        help="YYYYMMDD of the build night; defaults to today. Pin this for a "
-                             "run that will cross midnight so all its builds share a date.")
     parser.add_argument("--registry", type=Path, default=REGISTRY)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
@@ -110,10 +90,7 @@ def main() -> int:
     if not weights.exists():
         parser.error(f"{weights} not found — is this a finished adapter?")
 
-    day = args.date or date.today().strftime("%Y%m%d")
-    if not re.fullmatch(r"\d{8}", day):
-        parser.error(f"--date must be YYYYMMDD, got {day!r}")
-    version = f"{args.target}-nightly.{day}{next_suffix(args.target, day, args.registry)}"
+    version = f"{args.target}-build.{next_build_number(args.target, args.registry)}"
     stage = args.stage or ("dpo" if "dpo" in args.adapter.name or args.lineage in {"v5", "v7"} else "sft")
 
     # Hash every asset, not just the weights: a build is identified by everything that
@@ -127,7 +104,7 @@ def main() -> int:
 
     entry = {
         "version": version,
-        "channel": "nightly",
+        "channel": "dev",
         "created": f"{date.today().isoformat()}",
         "lineage": {"model": args.lineage, "dataset": args.dataset},
         "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
@@ -168,7 +145,7 @@ def main() -> int:
             f"| asset | sha256 |\n|---|---|\n{rows}\n\n"
             f"Verify with `shasum -a 256 -c SHA256SUMS`.\n\n"
             f"{args.notes}\n\n"
-            f"Not promoted. Nightlies have not cleared the eval gate in "
+            f"Not promoted. Dev builds have not cleared the eval gate in "
             f"[docs/RELEASES.md](docs/RELEASES.md) and should not be served.")
 
     command = ["gh", "release", "create", version,
