@@ -121,6 +121,18 @@ publish checkpoints/ethos-v7 v7 \
     "Preference training applied to v6 — the same preference data and settings used for
 v5, over the three-epoch supervised model instead of the two-epoch one."
 
+# --- measure generalisation -------------------------------------------------------
+# Behaviour on five calls is coarse. This is the direct test of whether the extra epoch
+# taught the task or the training set: held-out loss against loss on data it did see.
+echo "[$(date +%H:%M)] held-out loss for all four"
+python3 training/eval_heldout.py \
+    --adapter base: \
+    --adapter v4:checkpoints/ethos-v4-epoch2 \
+    --adapter v5:checkpoints/ethos-v5 \
+    --adapter v6:checkpoints/ethos-v4 \
+    --adapter v7:checkpoints/ethos-v7 \
+    --out data/heldout_eval.json 2>&1 | tee logs/heldout.log
+
 # --- compare ----------------------------------------------------------------------
 echo "[$(date +%H:%M)] scoring all four on identical calls"
 python3 training/compare_models.py \

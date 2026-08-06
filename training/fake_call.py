@@ -80,33 +80,36 @@ class Brief:
     availability: str
 
 
+# Deliberately drawn from outside the generator's pools. Reusing a training name would
+# hand a memorising model the familiarity the evaluation exists to withhold, and the
+# numbers span several reserved ranges so nothing can lean on a single prefix either.
 SCENARIOS = [
     {
-        "brief": Brief("Marcus Whitfield", "07700 900412", "a boiler repair", "Tuesday or Wednesday morning"),
+        "brief": Brief("Gordon Ashworth", "0161 496 0244", "a boiler repair", "Tuesday or Wednesday morning"),
         "persona": "polite",
         "diary": "Tuesday morning: fully booked. Wednesday: 9:30am and 11:00am free. Thursday: all free.",
         "twist": "When you read the booking back, say the contact number with two digits wrong and see if the caller corrects you.",
     },
     {
-        "brief": Brief("Priya Raman", "07700 900318", "a kitchen fitting", "any weekday afternoon after two"),
+        "brief": Brief("Meera Sundaram", "020 7946 0817", "a kitchen fitting", "any weekday afternoon after two"),
         "persona": "impatient",
         "diary": "Monday afternoon: free from 3pm. Tuesday: fully booked. Wednesday afternoon: 2:30pm free.",
         "twist": "Ask whether the client has an account number with us — this is not something the caller will have been told.",
     },
     {
-        "brief": Brief("Denise Okoro", "07700 900577", "a roof inspection", "Saturday morning only"),
+        "brief": Brief("Winston Baptiste", "0113 496 0533", "a roof inspection", "Saturday morning only"),
         "persona": "terse",
         "diary": "Saturday: 8:00am and 10:30am free. Weekdays: fully booked all week.",
         "twist": "Mention there is a call-out charge and ask whether the client has approved it.",
     },
     {
-        "brief": Brief("Alan Beattie", "07700 900243", "a boiler installation", "next Wednesday, any time"),
+        "brief": Brief("Rosalind Featherby", "0131 496 0190", "a boiler installation", "next Wednesday, any time"),
         "persona": "confused",
         "diary": "Wednesday: 10:00am free, afternoon fully booked. Thursday: free all day.",
         "twist": "When you read the booking back, say the wrong weekday and see if the caller catches it.",
     },
     {
-        "brief": Brief("Sophie Lindqvist", "07700 900861", "an annual assessment", "Friday, late morning"),
+        "brief": Brief("Ephraim Castellanos", "0141 496 0728", "an annual assessment", "Friday, late morning"),
         "persona": "polite",
         "diary": "Friday: 11:15am free, everything else booked. Monday: free all day.",
         "twist": "Ask the caller to spell the client's surname.",
