@@ -33,8 +33,10 @@ class Hyperparameters:
     epochs: int = 1
     per_device_batch_size: int = 2
     gradient_accumulation_steps: int = 8
+    # TRL 1.x truncates the whole prompt-plus-response sequence with one budget and drops
+    # the oldest turns first, so a separate prompt budget no longer exists to set.
     max_length: int = 1024
-    max_prompt_length: int = 896
+    truncation_mode: str = "keep_end"
     warmup_ratio: float = 0.1
 
 
@@ -106,7 +108,9 @@ def main() -> int:
         per_device_train_batch_size=hyperparameters.per_device_batch_size,
         gradient_accumulation_steps=hyperparameters.gradient_accumulation_steps,
         max_length=hyperparameters.max_length,
-        max_prompt_length=hyperparameters.max_prompt_length,
+        # Keep the end of an over-long conversation. The turn being judged is the last one,
+        # and truncating from the end would cut away the very thing the pair disagrees about.
+        truncation_mode=hyperparameters.truncation_mode,
         warmup_ratio=hyperparameters.warmup_ratio,
         logging_steps=10,
         gradient_checkpointing=True,
