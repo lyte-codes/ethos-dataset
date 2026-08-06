@@ -243,22 +243,23 @@
       <div class="stat"><span class="label">Elapsed</span><span class="v" id="s-elapsed">—</span><span class="sub" id="s-rate">—</span></div>
       <div class="stat"><span class="label">Remaining</span><span class="v" id="s-eta">—</span><span class="sub" id="s-done">—</span></div>
     </div>
-  </section>
 
-  <section class="card" id="loss-card">
-    <div class="chart-head">
-      <div class="label">Training loss</div>
-      <div class="label" id="loss-range">—</div>
-    </div>
-    <div class="chart-scroll"><svg id="losschart" viewBox="0 0 720 250" role="img" aria-label="Training loss over steps"></svg></div>
-  </section>
+    <!-- Loss and gradient norm belong to the same run as the numbers above, so they sit in
+         the same box rather than in cards of their own. Three separate panels read as three
+         separate things and made the page longer than the run was interesting. -->
+    <div id="charts" hidden>
+      <div class="chart-head">
+        <div class="label">Training loss</div>
+        <div class="label" id="loss-range">—</div>
+      </div>
+      <div class="chart-scroll"><svg id="losschart" viewBox="0 0 720 250" role="img" aria-label="Training loss over steps"></svg></div>
 
-  <section class="card" id="gn-card">
-    <div class="chart-head">
-      <div class="label">Gradient norm</div>
-      <div class="label">log scale · pre-clip</div>
+      <div class="chart-head" style="margin-top:.75rem">
+        <div class="label">Gradient norm</div>
+        <div class="label">log scale · pre-clip</div>
+      </div>
+      <div class="chart-scroll"><svg id="gnchart" viewBox="0 0 720 130" role="img" aria-label="Gradient norm over steps"></svg></div>
     </div>
-    <div class="chart-scroll"><svg id="gnchart" viewBox="0 0 720 130" role="img" aria-label="Gradient norm over steps, with spikes marked"></svg></div>
   </section>
 
   <section class="card" id="eval-card" hidden>
@@ -599,8 +600,7 @@ function render(d) {
   // Charts of an empty run read as a broken dashboard rather than a stage that has not
   // started, so they stay out of the layout until there is something to plot.
   const hasMetrics = d.log.length > 0;
-  el("loss-card").hidden = !hasMetrics;
-  el("gn-card").hidden = !hasMetrics;
+  el("charts").hidden = !hasMetrics;
   el("notes").hidden = !hasMetrics && d.stage !== "generation";
   renderGeneration(d);
   renderPipeline(d);
