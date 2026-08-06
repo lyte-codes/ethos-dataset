@@ -157,6 +157,38 @@ def dpo_progress(name: str) -> dict:
     return parse_log_tail(log)
 
 
+def published_versions() -> dict[str, str]:
+    """What each build is actually called, read from the registry rather than assumed."""
+    registry = Path("releases/registry.jsonl")
+    if not registry.exists():
+        return {}
+    versions = {}
+    with registry.open(encoding="utf-8") as handle:
+        for line in handle:
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            versions[entry.get("lineage", {}).get("model", "")] = entry.get("version", "")
+    return versions
+
+
+def next_version(target: str, published: dict[str, str]) -> str:
+    """What an unpublished build would be called if it were published now."""
+    numbers = [int(v.rsplit(".", 1)[1]) for v in published.values()
+               if v.startswith(f"{target}-build.") and v.rsplit(".", 1)[1].isdigit()]
+    return f"{target}-build.{max(numbers, default=0) + 1}"
+
+
+def held_out_scores() -> dict[str, dict]:
+    """Each build's measured result, so a finished stage can show what it scored."""
+    path = Path("data/heldout_eval.json")
+    try:
+        return json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
 def pipeline_stages(sft: dict) -> list[dict]:
     """The four builds, what state each is in, and how long until it exists.
 
@@ -173,6 +205,9 @@ def pipeline_stages(sft: dict) -> list[dict]:
             return None
         return (target_step - step) * rate
 
+    published = published_versions()
+    unpublished = next_version("0.1", published)
+    scores = held_out_scores()
     sft_running = is_running("train_lora.py")
     v4_done = Path("checkpoints/ethos-v4-epoch2/adapter_model.safetensors").exists()
     v6_done = Path("checkpoints/ethos-v4/adapter_model.safetensors").exists()
@@ -180,7 +215,9 @@ def pipeline_stages(sft: dict) -> list[dict]:
     stages = []
 
     stages.append({
-        "key": "v4", "label": "v4 — supervised, epoch 2", "release": "build.1",
+        "key": "v4", "label": "v4 — supervised, epoch 2",
+        "release": published.get("v4") or unpublished,
+        "published": "v4" in published, "score": scores.get("v4"),
         "state": "done" if v4_done else "running" if sft_running else "waiting",
         "eta": None if v4_done else seconds_to(epoch_two_step),
         "estimated": False, "confidence": "measured",
@@ -188,7 +225,9 @@ def pipeline_stages(sft: dict) -> list[dict]:
     })
 
     stages.append({
-        "key": "v6", "label": "v6 — supervised, epoch 3", "release": "build.2",
+        "key": "v6", "label": "v6 — supervised, epoch 3",
+        "release": published.get("v6") or unpublished,
+        "published": "v6" in published, "score": scores.get("v6"),
         "state": "done" if v6_done else "running" if sft_running else "waiting",
         "eta": None if v6_done else seconds_to(total),
         "estimated": False, "confidence": "measured",
@@ -220,7 +259,7 @@ def pipeline_stages(sft: dict) -> list[dict]:
         per_run, confidence = (rate or 0) * multiplier * dpo_steps, "guess"
 
     pending = 0.0
-    for key, release, base in [("v5", "build.3", "v4")]:
+    for key, base in [("v5", "v4")]:
         done = Path(f"checkpoints/ethos-{key}/adapter_model.safetensors").exists()
         live = live_runs[key]
         if done:
@@ -235,7 +274,9 @@ def pipeline_stages(sft: dict) -> list[dict]:
             eta = queue + pending
             level = confidence
         stages.append({
-            "key": key, "label": f"{key} — preference training on {base}", "release": release,
+            "key": key, "label": f"{key} — preference training on {base}",
+            "release": published.get(key) or unpublished,
+            "published": key in published, "score": scores.get(key),
             "state": state, "eta": eta, "estimated": level != "measured", "confidence": level,
             "detail": f"DPO from {base}",
         })

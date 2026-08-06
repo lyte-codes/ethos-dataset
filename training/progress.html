@@ -141,7 +141,7 @@
     letter-spacing: .04em;
   }
   .stage-row {
-    display: grid; grid-template-columns: 1.4rem 1fr auto auto; gap: .5rem .85rem;
+    display: grid; grid-template-columns: 1.4rem 1fr auto minmax(9rem, auto); gap: .5rem .85rem;
     align-items: baseline; padding: .6rem 0; border-bottom: 1px solid var(--edge);
     font-size: .9rem;
   }
@@ -261,7 +261,7 @@
 
   <section class="card pipe" id="pipeline">
     <div class="prog-head">
-      <div class="label">Tonight's builds</div>
+      <div class="label">Builds</div>
       <div class="label">published in the order they are made</div>
     </div>
     <div id="stages"></div>
@@ -435,7 +435,10 @@ function renderPipeline(d) {
     const mark = stage.state === "done" ? "✓" : stage.state === "running" ? "▸" : "·";
     let when;
     if (stage.state === "done") {
-      when = "done";
+      // A finished build's useful fact is what it scored, not that it finished.
+      when = stage.score
+        ? `held-out <strong>${stage.score.heldout_loss.toFixed(3)}</strong>`
+        : "done";
     } else if (stage.eta == null) {
       when = "—";
     } else {
@@ -447,7 +450,8 @@ function renderPipeline(d) {
 
     row.innerHTML =
       `<span class="mark">${mark}</span>` +
-      `<span>${stage.label}<br><span class="release">${stage.release} · ${stage.detail}</span></span>` +
+      `<span>${stage.label}<br><span class="release">${stage.release}` +
+      `${stage.published ? "" : " (unpublished)"} · ${stage.detail}</span></span>` +
       `<span class="state">${stage.state}</span>` +
       `<span class="when">${when}</span>`;
     host.appendChild(row);
