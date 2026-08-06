@@ -18,6 +18,7 @@ are the ones the adapter genuinely never saw.
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import os
 import sys
@@ -116,7 +117,17 @@ def main() -> int:
         }
         print(f"{name:>6}  train {train_loss:.3f}  held-out {held_loss:.3f}  "
               f"gap {held_loss - train_loss:+.3f}", flush=True)
+
+        # `del` alone drops the reference but leaves the weights in the MPS allocator's
+        # cache, so the next model is allocated on top of the last one and the process is
+        # killed partway through the second. Release it before loading anything else.
+        args.out.write_text(json.dumps(results, indent=2))
         del model
+        gc.collect()
+        if device == "mps":
+            torch.mps.empty_cache()
+        elif device == "cuda":
+            torch.cuda.empty_cache()
 
     print()
     if results:

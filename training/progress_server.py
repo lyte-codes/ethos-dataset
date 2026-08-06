@@ -248,6 +248,18 @@ def collect(output: Path, log: Path, pattern: str,
         ]
 
     state.update({k: v for k, v in parse_log_tail(log).items() if v is not None})
+
+    # A finished adapter beats whatever the log tail says. The log's last line is wherever
+    # the run happened to stop being watched — for a run that was killed and later resumed
+    # under a different log, that is a stale mid-run reading with a rate to match, and it
+    # would otherwise be shown as if it were live.
+    if (output / "adapter_model.safetensors").exists():
+        state["step"] = state.get("max_steps") or state.get("step")
+        state["complete"] = True
+        state["remaining"] = "finished"
+    else:
+        state["complete"] = False
+
     if state["stage"] == "idle" and state.get("log"):
         state["stage"] = "training"
 
