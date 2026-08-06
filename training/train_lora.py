@@ -115,6 +115,15 @@ def main() -> int:
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--learning-rate", type=float, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument("--lora-rank", type=int, default=None)
+    parser.add_argument("--lora-alpha", type=int, default=None)
+    parser.add_argument("--lora-dropout", type=float, default=None)
+    parser.add_argument("--grad-accum", type=int, default=None)
+    parser.add_argument("--target-modules", default=None,
+                        help="comma-separated projection names to adapt")
+    parser.add_argument("--limit", type=int, default=None,
+                        help="train on only the first N examples — for cheap proxy runs "
+                             "during a hyperparameter search, not for a real build")
     parser.add_argument("--resume-from-checkpoint", type=Path, default=None,
                         help="continue a run from a checkpoint directory. The checkpoint holds "
                              "optimizer and scheduler state as well as weights, so the run picks "
@@ -128,6 +137,16 @@ def main() -> int:
         hyperparameters.learning_rate = args.learning_rate
     if args.batch_size:
         hyperparameters.per_device_batch_size = args.batch_size
+    if args.lora_rank:
+        hyperparameters.lora_rank = args.lora_rank
+    if args.lora_alpha:
+        hyperparameters.lora_alpha = args.lora_alpha
+    if args.lora_dropout is not None:
+        hyperparameters.lora_dropout = args.lora_dropout
+    if args.grad_accum:
+        hyperparameters.gradient_accumulation_steps = args.grad_accum
+    if args.target_modules:
+        hyperparameters.target_modules = tuple(m.strip() for m in args.target_modules.split(","))
 
     device = select_device()
     print(f"device: {device}")
@@ -137,6 +156,10 @@ def main() -> int:
         tokenizer.pad_token = tokenizer.eos_token
 
     examples = load_examples(args.data)
+    if args.limit:
+        # Truncate before splitting, so the held-out conversations still come from the
+        # examples actually being trained on rather than from data this run never sees.
+        examples = examples[:args.limit]
     train_examples, eval_examples = split_by_conversation(
         examples, args.eval_fraction, args.seed
     )

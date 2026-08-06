@@ -129,6 +129,7 @@ docs/
   TRAINING.md             hyperparameters, hardware notes, what to tune
   VERSIONING.md           internal dataset/model counters
   RELEASES.md             what gets shipped, and how it is promoted
+  CALLS.md                what a real phone call needs beyond the model
 ```
 
 ## Why the quality gate exists
