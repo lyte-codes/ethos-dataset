@@ -80,6 +80,40 @@ Run the same handful of calls through both. What the fine-tune should improve:
 Eval loss alone will not tell you whether the last point improved. Check it by hand, or run
 `check_quality.py`'s rules over generated conversations.
 
+## How many epochs
+
+Two. Measured, not assumed.
+
+Three epochs on `ethos-booking-v2` produced a model with a *lower* training loss and a
+*higher* held-out loss than the same run stopped at two:
+
+| | train | held-out | gap |
+|---|---|---|---|
+| base, untuned | 1.716 | 1.885 | +0.169 |
+| 2 epochs | 0.628 | **1.342** | +0.714 |
+| 3 epochs | **0.530** | 1.516 | +0.986 |
+
+The third epoch bought nothing but memorisation. Note also how the gap tracks epochs — the
+untuned model's +0.169 is the honest spread between the two splits, and everything above that
+is the model recognising conversations rather than doing the job.
+
+The trap is that nothing visible during training says so. Training loss falls the whole way,
+and on this machine in-loop eval is disabled because it exhausts memory, so the run reports
+only the number that keeps improving. The tell in the curve is that loss drops in steps at
+each epoch boundary rather than descending smoothly — but that is suggestive, not conclusive.
+
+Measure it rather than reading the shape:
+
+```bash
+python3 training/eval_heldout.py \
+    --adapter v4:checkpoints/ethos-v4 \
+    --adapter v6:checkpoints/ethos-v6
+```
+
+Lower held-out loss wins, whatever the training losses say. Scoring runs in bfloat16 by
+default, which agreed with fp32 to within 0.008 here — far below any difference worth acting
+on, and it halves the memory.
+
 ## Penalising invented details (model v5)
 
 Supervised training rewards the right answer but never marks a wrong one as wrong. If the
