@@ -432,9 +432,32 @@ function renderNotes(d) {
        Last five readings: ${recent.map(v => v.toFixed(3)).join(", ")}.`]);
   }
 
-  items.push(["ok",
-    `Not a data defect — all 1,157 examples checked: no fully-masked rows, nothing truncated at the
-     1,024-token cap, sequences 105–640 tokens.`]);
+  // Loss falling in steps at epoch boundaries, rather than continuously, is what
+  // memorisation looks like from the outside. Worth surfacing, because in-loop eval is
+  // off on MPS so training loss is the only signal here — and it cannot tell the
+  // difference on its own.
+  const epochs = d.epochs || 3;
+  const perEpoch = (d.max_steps || 1) / epochs;
+  const means = [];
+  for (let e = 0; e < epochs; e++) {
+    const inEpoch = losses.filter(x => x.step > perEpoch * e && x.step <= perEpoch * (e + 1));
+    if (inEpoch.length >= 3) {
+      means.push({ epoch: e + 1, mean: inEpoch.reduce((a, b) => a + b.loss, 0) / inEpoch.length });
+    }
+  }
+  if (means.length >= 2) {
+    const drops = means.slice(1).map((m, i) => means[i].mean - m.mean);
+    const biggest = Math.max(...drops);
+    const summary = means.map(m => `epoch ${m.epoch}: ${m.mean.toFixed(2)}`).join(" · ");
+    items.push([biggest > 0.2 ? "watch" : "ok",
+      biggest > 0.2
+        ? `<strong>Loss is stepping down at epoch boundaries</strong> (${summary}). A drop that
+           lands on the boundary rather than spreading across it is what memorising looks like
+           from outside. Training loss cannot settle it — the held-out comparison between the
+           two-epoch and three-epoch builds can.`
+        : `Loss is descending smoothly across epochs (${summary}), with no step at the
+           boundaries — consistent with learning rather than memorising.`]);
+  }
 
   for (const [flag, html] of items) {
     const note = document.createElement("div");
