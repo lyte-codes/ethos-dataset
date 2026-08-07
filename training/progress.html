@@ -422,11 +422,16 @@ const RENDER = {
                    "the margin between chosen and rejected, not the likelihood of chosen alone, so " +
                    "a preference run can score worse here while being the better model. Preference " +
                    "accuracy judges DPO and says nothing about whether the model can still hold a " +
-                   "conversation. This combines both: 40% fluency (held-out loss, scaled to the base " +
-                   "model), 60% faithfulness (preference accuracy, weighted toward phone digits — " +
-                   "the costliest detail to invent). A model below the phone-accuracy floor is capped " +
-                   "regardless of everything else, matching the hard promotion gate rather than " +
-                   "averaging past it.");
+                   "conversation. This combines both, weighted equally by default: the hard " +
+                   "constraint on faithfulness is already enforced by the phone floor below, not by " +
+                   "skewing this blend, so skewing it too would double-count the same preference. " +
+                   "Faithfulness itself is a macro-average across corruption kinds — phone, time, " +
+                   "weekday, unearned name — rather than by frequency, since phone corruptions are " +
+                   "only 12% of the training pairs and a frequency-weighted score would barely " +
+                   "count the failure that matters most. The phone floor is chance (50%), raised " +
+                   "only if the base model already clears it; a model under the floor is capped at " +
+                   "the base model's own composite, not a fixed number — every constant here is " +
+                   "measured or mathematically defined, not chosen by feel.");
       return;
     }
     const complete = names.filter(n => scores[n].composite != null);
@@ -443,16 +448,18 @@ const RENDER = {
           `<td>${s.fluency != null ? s.fluency.toFixed(1) : "—"}</td>` +
           `<td>${s.faithfulness != null ? s.faithfulness.toFixed(1) : "—"}</td>` +
           `<td class="${!capped && s.composite === bestComposite ? "best" : ""}${capped ? " warn" : ""}">${compositeCell}</td>` +
-          `<td class="${phoneAcc != null && phoneAcc < (data.weights?.phone_floor ?? 0.6) ? "warn" : ""}">` +
+          `<td class="${phoneAcc != null && phoneAcc < (data.weights?.phone_floor ?? 0.5) ? "warn" : ""}">` +
           `${phoneAcc != null ? (phoneAcc * 100).toFixed(0) + "%" : "—"}</td></tr>`;
       }).join("");
     host.appendChild(table);
     const w = data.weights || {};
-    noteEl(host, `Weights: fluency ${((w.fluency ?? 0.4) * 100).toFixed(0)}%, faithfulness ` +
-                 `${((w.faithfulness ?? 0.6) * 100).toFixed(0)}%, phone floor ` +
-                 `${((w.phone_floor ?? 0.6) * 100).toFixed(0)}%. A model under the phone floor is ` +
-                 "capped regardless of its other numbers — a weighted average alone would let a bad " +
-                 "phone number hide behind good ones everywhere else.");
+    noteEl(host, `Weights: fluency ${((w.fluency ?? 0.5) * 100).toFixed(0)}%, faithfulness ` +
+                 `${((w.faithfulness ?? 0.5) * 100).toFixed(0)}%. Phone floor ` +
+                 `${((w.phone_floor ?? 0.5) * 100).toFixed(0)}% — ${w.phone_floor_reason || "chance"}. ` +
+                 "A model under the floor is capped at the base model's own composite " +
+                 `(${w.capped_reference != null ? w.capped_reference.toFixed(1) : "unavailable"}), ` +
+                 "not a fixed number — a weighted average alone would let a bad phone number hide " +
+                 "behind good ones everywhere else.");
   },
 
   hpsearch(host, item) {
