@@ -285,6 +285,172 @@ def pipeline_stages(sft: dict) -> list[dict]:
     return stages
 
 
+LOSS_DICT = re.compile(r"\{'loss':[^}]+\}")
+
+
+def tail_of(path: Path, size: int = 262144) -> str:
+    if not path.exists():
+        return ""
+    with path.open("rb") as handle:
+        handle.seek(0, 2)
+        handle.seek(max(0, handle.tell() - size))
+        return handle.read().decode("utf-8", "replace").replace("\r", "\n")
+
+
+def parse_dpo(log: Path) -> dict:
+    """The two phases of a preference run, told apart by the tqdm prefix on the line."""
+    text = tail_of(log)
+    if not text:
+        return {}
+    precompute, training = None, None
+    for line in text.splitlines():
+        match = PROGRESS.search(line)
+        if not match:
+            continue
+        step, total, elapsed, remaining, rate, unit = match.groups()
+        reading = {"step": int(step), "max_steps": int(total), "elapsed": elapsed,
+                   "remaining": remaining.strip(), "sec_per_step": float(rate)}
+        if "reference log probs" in line:
+            precompute = reading
+        else:
+            training = reading
+
+    losses = []
+    for blob in LOSS_DICT.findall(text):
+        try:
+            entry = json.loads(blob.replace("'", '"'))
+        except json.JSONDecodeError:
+            continue
+        losses.append({"loss": entry.get("loss"), "gn": entry.get("grad_norm"),
+                       "step": len(losses) * 10 + 10})
+    return {"precompute": precompute, "training": training, "losses": losses}
+
+
+def parse_asr(log: Path) -> dict:
+    text = tail_of(log)
+    if "running the ASR smoke test" not in text:
+        return {}
+    section = text.split("running the ASR smoke test", 1)[1]
+    if "ASR test done" in section:
+        section = section.split("ASR test done", 1)[0]
+        finished = True
+    else:
+        finished = False
+    lines = [l for l in section.splitlines()
+             if l.strip() and not l.startswith("[") and "model:" not in l]
+    return {"finished": finished, "transcript": " ".join(lines).strip()}
+
+
+def parse_hpsearch(journal: Path, runlog: Path) -> dict:
+    entries = []
+    if journal.exists():
+        for line in journal.read_text().splitlines():
+            if line.strip():
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
+    state = {"evaluated": len(entries), "running": is_running("search_hyperparameters.py")}
+    scored = [e for e in entries if e.get("score") is not None]
+    if scored:
+        best = min(scored, key=lambda e: e["score"])
+        state["best"] = {"score": best["score"], "candidate": best.get("candidate"),
+                         "conversations": best.get("conversations")}
+        state["recent"] = [{"score": e["score"], "rung": e.get("rung"),
+                            "generation": e.get("generation"),
+                            "conversations": e.get("conversations")} for e in scored[-6:]]
+    text = tail_of(runlog, 8192)
+    for line in reversed(text.splitlines()):
+        if line.startswith("=== generation") or line.startswith("  -- rung"):
+            state["phase"] = line.strip("= -")
+            break
+    return state
+
+
+def sft_history(directory: Path) -> list[dict]:
+    """Loss/grad-norm points for a finished supervised run, wherever its state landed."""
+    candidates = [directory / "trainer_state.json"] + sorted(
+        directory.glob("checkpoint-*/trainer_state.json"),
+        key=lambda q: int(q.parent.name.rsplit("-", 1)[1]), reverse=True)
+    for path in candidates:
+        if path.exists():
+            try:
+                saved = json.loads(path.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            return [{"step": e["step"], "loss": e.get("loss"), "gn": e.get("grad_norm")}
+                    for e in saved.get("log_history", []) if "loss" in e]
+    return []
+
+
+def build_queue(state: dict) -> list[dict]:
+    """Everything the machine has done or will do, one row each, newest plans last."""
+    published = published_versions()
+    scores = held_out_scores()
+    prefs = {}
+    try:
+        prefs = json.loads(Path("data/preference_eval.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    chain_armed = is_running("after_v5.sh")
+    dpo = parse_dpo(Path("logs/v5-dpo.log"))
+    dpo_running = is_running("train_dpo.py")
+    v5_done = Path("checkpoints/ethos-v5/adapter_model.safetensors").exists()
+    asr = parse_asr(Path("logs/after_v5.log"))
+    search = parse_hpsearch(Path("logs/hpsearch.jsonl"), Path("logs/hpsearch_run.log"))
+
+    queue = []
+    generation = state.get("generation")
+    if generation:
+        queue.append({"id": "dataset", "kind": "generation",
+                      "title": "Dataset — ethos-booking-v2",
+                      "sub": f"{generation.get('conversations', 0)} conversations, "
+                             f"{generation.get('examples', 0)} examples",
+                      "state": "done" if not generation.get("running") else "running",
+                      "generation": generation})
+
+    for key, title, directory in [("v4", "v4 — supervised, epoch 2", "checkpoints/ethos-v4"),
+                                  ("v6", "v6 — supervised, epoch 3", "checkpoints/ethos-v6")]:
+        done = Path(directory, "adapter_model.safetensors").exists()
+        entry = {"id": key, "kind": "sft", "title": title,
+                 "sub": published.get(key, "unpublished"),
+                 "state": "done" if done else "waiting",
+                 "score": scores.get(key), "log": sft_history(Path(directory))}
+        queue.append(entry)
+
+    v5_state = ("done" if v5_done else "running" if dpo_running
+                else "failed" if dpo and not chain_armed and not dpo_running else "waiting")
+    queue.append({"id": "v5", "kind": "dpo", "title": "v5 — preference training on v4",
+                  "sub": published.get("v5", "unpublished"),
+                  "state": v5_state, "score": scores.get("v5"), "dpo": dpo})
+
+    queue.append({"id": "asr", "kind": "asr", "title": "ASR smoke test — Whisper medium.en",
+                  "sub": "first transcription of a generated call line",
+                  "state": "done" if asr.get("finished") else
+                           "running" if asr else "waiting",
+                  "asr": asr})
+
+    queue.append({"id": "heldout", "kind": "eval", "title": "Held-out loss — v4, v6, v5",
+                  "sub": "loss on 9 conversations no model trained on",
+                  "state": "done" if scores.get("v5") else
+                           "partial" if scores else "waiting",
+                  "scores": scores})
+
+    queue.append({"id": "prefs", "kind": "prefeval", "title": "Preference accuracy — base, v4, v5",
+                  "sub": "does it prefer the brief over a corruption",
+                  "state": "done" if prefs else "waiting", "prefs": prefs})
+
+    queue.append({"id": "search", "kind": "hpsearch",
+                  "title": "Hyperparameter search — 6 x 3 generations",
+                  "sub": "successive halving, 20 - 60 - 189 conversations",
+                  "state": "running" if search.get("running") else
+                           "done" if search.get("evaluated") and not chain_armed and not search.get("running") and not dpo_running else
+                           "waiting",
+                  "search": search})
+    return queue
+
+
 def collect(output: Path, log: Path, pattern: str,
             generation_log: Path | None = None) -> dict:
     state: dict = {"running": is_running(pattern), "log": [], "max_grad_norm": None}
@@ -335,6 +501,7 @@ def collect(output: Path, log: Path, pattern: str,
         state["stage"] = "training"
 
     state["stages"] = pipeline_stages(state)
+    state["queue"] = build_queue(state)
 
     evaluation = parse_eval(Path("logs/heldout_bf16.log"))
     if evaluation.get("results") or evaluation.get("current"):
@@ -360,12 +527,46 @@ def collect(output: Path, log: Path, pattern: str,
     return state
 
 
+# Which raw log backs each queue item. The terminal view serves these verbatim — the
+# parsed cards above are a summary, and a summary should always be checkable against the
+# thing it summarised.
+ITEM_LOGS = {
+    "dataset": Path("v2-generate.log"),
+    "v4": Path("v4-train.log"),
+    "v6": Path("logs/v6-resume.log"),
+    "v5": Path("logs/v5-dpo.log"),
+    "asr": Path("logs/after_v5.log"),
+    "heldout": Path("logs/heldout_bf16.log"),
+    "prefs": Path("logs/after_v5.log"),
+    "search": Path("logs/hpsearch_run.log"),
+}
+
+
+def terminal_tail(item: str, size: int = 16384) -> str:
+    """Last stretch of the item's log, carriage returns unrolled so tqdm history reads
+    as lines rather than one endlessly-overwritten one."""
+    path = ITEM_LOGS.get(item)
+    if path is None:
+        return f"(no log mapped for {item!r})"
+    if not path.exists():
+        return f"({path} does not exist yet)"
+    text = tail_of(path, size)
+    lines = [l for l in text.splitlines() if l.strip()]
+    return "\n".join(lines[-200:]) or "(empty)"
+
+
 def make_handler(output: Path, log: Path, pattern: str, page: Path, generation_log: Path):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 — BaseHTTPRequestHandler's interface
             if self.path.startswith("/data.json"):
                 body = json.dumps(collect(output, log, pattern, generation_log)).encode()
                 content_type = "application/json"
+            elif self.path.startswith("/terminal"):
+                from urllib.parse import parse_qs, urlparse
+
+                item = parse_qs(urlparse(self.path).query).get("id", [""])[0]
+                body = terminal_tail(item).encode()
+                content_type = "text/plain; charset=utf-8"
             else:
                 body = page.read_bytes()
                 content_type = "text/html; charset=utf-8"

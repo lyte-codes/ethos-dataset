@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ethos v2 — live</title>
+<title>Ethos — live</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -31,7 +31,7 @@
     padding: clamp(1.25rem,4vw,3rem) 1.25rem 4rem;
   }
 
-  .wrap { max-width: 780px; margin: 0 auto; display: flex; flex-direction: column; gap: 2rem; }
+  .wrap { max-width: 780px; margin: 0 auto; display: flex; flex-direction: column; gap: 1.6rem; }
 
   .label {
     font-family: var(--mono); font-size: .685rem; letter-spacing: .14em;
@@ -53,14 +53,11 @@
     border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
     display: inline-flex; align-items: center; gap: .4rem;
   }
-
   .pill.stopped {
     background: color-mix(in srgb, var(--crit) 14%, transparent);
     color: var(--crit); border-color: color-mix(in srgb, var(--crit) 35%, transparent);
   }
-
   .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-
   @media (prefers-reduced-motion: no-preference) {
     .pill:not(.stopped) .dot { animation: pulse 2.4s ease-in-out infinite; }
     @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:.25 } }
@@ -70,97 +67,101 @@
 
   .card {
     background: var(--surface); border: 1px solid var(--edge); border-radius: 3px;
-    padding: 1.25rem; display: flex; flex-direction: column; gap: 1rem;
+    padding: 1.25rem; display: flex; flex-direction: column; gap: .4rem;
   }
-
-  /* A class-level `display` beats the UA sheet's `[hidden] { display: none }`, so hiding a
-     card needs to be stated at the same specificity or the attribute silently does nothing. */
   [hidden] { display: none !important; }
 
-  .prog-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
+  .queue-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin-bottom: .5rem; }
 
-  .prog-pct {
-    font-family: var(--mono); font-size: 1.9rem; font-weight: 600;
-    font-variant-numeric: tabular-nums; letter-spacing: -.02em;
+  .toggle {
+    font-family: var(--mono); font-size: .72rem; color: var(--muted);
+    background: none; border: 1px solid var(--edge); border-radius: 2px;
+    padding: .3rem .6rem; cursor: pointer;
   }
+  .toggle[aria-pressed="true"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+  .toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-  .prog-steps { font-family: var(--mono); font-size: .85rem; font-variant-numeric: tabular-nums; color: var(--muted); }
+  /* ---- queue rows ---- */
+  .item { border-bottom: 1px solid var(--edge); }
+  .item:last-child { border-bottom: none; }
 
-  .track {
-    position: relative; height: 30px; border-radius: 2px; overflow: hidden;
-    background: color-mix(in srgb, var(--text) 6%, transparent);
+  .item-head {
+    display: grid; grid-template-columns: 1.4rem 1fr auto auto; gap: .5rem .85rem;
+    align-items: baseline; padding: .7rem .3rem; width: 100%;
+    background: none; border: none; color: inherit; font: inherit; text-align: left;
+    cursor: pointer;
   }
+  .item-head:hover { background: color-mix(in srgb, var(--text) 3%, transparent); }
+  .item-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-  .fill {
-    position: absolute; inset: 0 auto 0 0; background: var(--accent);
-    border-radius: 2px 0 0 2px; transition: width .6s ease;
+  .mark { font-family: var(--mono); text-align: center; color: var(--muted); }
+  .item.running .mark, .item.done .mark { color: var(--accent); }
+  .item.failed .mark { color: var(--crit); }
+
+  .t { font-size: .92rem; font-weight: 600; }
+  .t small { display: block; font-family: var(--mono); font-weight: 400; font-size: .68rem; color: var(--muted); letter-spacing: .03em; }
+
+  .state {
+    font-family: var(--mono); font-size: .68rem; color: var(--muted);
+    letter-spacing: .06em; text-transform: uppercase;
   }
+  .item.running .state { color: var(--accent); }
+  .item.failed .state { color: var(--crit); }
 
-  @media (prefers-reduced-motion: reduce) { .fill { transition: none; } }
+  .chev { font-family: var(--mono); color: var(--muted); transition: transform .15s ease; }
+  .item.open .chev { transform: rotate(90deg); }
+  @media (prefers-reduced-motion: reduce) { .chev { transition: none; } }
 
-  .tick { position: absolute; top: 0; bottom: 0; width: 1px; background: color-mix(in srgb, var(--text) 18%, transparent); }
-  .tick.ckpt { top: auto; height: 6px; bottom: 0; background: color-mix(in srgb, var(--text) 22%, transparent); }
+  .item-body { padding: .3rem .3rem 1.1rem 2.75rem; display: flex; flex-direction: column; gap: .9rem; }
 
-  .epoch-row { position: relative; height: 1.1rem; font-family: var(--mono); font-size: .66rem; color: var(--muted); }
-  .epoch-row span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
-
+  /* ---- shared detail bits ---- */
   .stats {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(140px,1fr));
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(130px,1fr));
     gap: 1px; background: var(--edge); border: 1px solid var(--edge);
     border-radius: 3px; overflow: hidden;
   }
+  .stat { background: var(--surface); padding: .7rem .9rem; display: flex; flex-direction: column; gap: .2rem; }
+  .stat .v { font-family: var(--mono); font-size: 1.05rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stat .sub { font-family: var(--mono); font-size: .66rem; color: var(--muted); }
 
-  .stat { background: var(--surface); padding: .85rem 1rem; display: flex; flex-direction: column; gap: .25rem; }
-  .stat .v { font-family: var(--mono); font-size: 1.15rem; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .stat .sub { font-family: var(--mono); font-size: .7rem; color: var(--muted); }
+  .track { position: relative; height: 20px; border-radius: 2px; overflow: hidden;
+           background: color-mix(in srgb, var(--text) 6%, transparent); }
+  .fill { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: 2px 0 0 2px; }
 
-  .chart-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
   .chart-scroll { overflow-x: auto; }
   svg { display: block; width: 100%; min-width: 420px; height: auto; }
 
-  .pipe { display: flex; flex-direction: column; gap: .4rem; }
-  .stage {
-    display: grid; grid-template-columns: 1.4rem 1fr auto; gap: .75rem; align-items: center;
-    padding: .5rem 0; border-bottom: 1px solid var(--edge); font-size: .9rem;
+  table { border-collapse: collapse; font-family: var(--mono); font-size: .84rem; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: .4rem 1.1rem .4rem 0; border-bottom: 1px solid var(--edge); }
+  th { font-size: .66rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+  tr:last-child td { border-bottom: none; }
+  td.best { color: var(--accent); font-weight: 600; }
+  td.warn { color: var(--warn); }
+
+  .transcript {
+    font-size: .9rem; background: color-mix(in srgb, var(--text) 4%, transparent);
+    border-left: 3px solid var(--accent); padding: .7rem .9rem; border-radius: 2px;
+    max-width: 62ch;
   }
-  .stage:last-child { border-bottom: none; }
-  .stage .mark { font-family: var(--mono); text-align: center; color: var(--muted); }
-  .stage .state {
+  .note { font-size: .8rem; color: var(--muted); max-width: 64ch; }
+  code { font-family: var(--mono); font-size: .85em; background: color-mix(in srgb, var(--text) 7%, transparent);
+         padding: .06em .3em; border-radius: 2px; }
+
+  .term-btn {
+    align-self: flex-start;
     font-family: var(--mono); font-size: .7rem; color: var(--muted);
-    letter-spacing: .06em; text-transform: uppercase;
+    background: none; border: 1px solid var(--edge); border-radius: 2px;
+    padding: .28rem .6rem; cursor: pointer;
   }
-  .stage.live .mark, .stage.live .state, .stage.done .mark { color: var(--accent); }
-  .stage .when {
-    font-family: var(--mono); font-size: .78rem; font-variant-numeric: tabular-nums;
-    color: var(--muted); text-align: right; white-space: nowrap;
-  }
-  .stage .when em { font-style: normal; opacity: .65; }
-  .stage.done .when { color: var(--accent); }
-  .stage .release {
-    font-family: var(--mono); font-size: .66rem; color: var(--muted);
-    letter-spacing: .04em;
-  }
-  .stage-row {
-    display: grid; grid-template-columns: 1.4rem 1fr auto minmax(9rem, auto); gap: .5rem .85rem;
-    align-items: baseline; padding: .6rem 0; border-bottom: 1px solid var(--edge);
-    font-size: .9rem;
-  }
-  .stage-row:last-of-type { border-bottom: none; }
-  .stage-row .mark { font-family: var(--mono); text-align: center; color: var(--muted); }
-  .stage-row.live .mark, .stage-row.done .mark { color: var(--accent); }
-  .stage-row.live .when { color: var(--accent); }
-  .eval-row {
-    display: grid; grid-template-columns: 3.5rem repeat(3, 1fr); gap: .5rem .9rem;
-    padding: .55rem 0; border-bottom: 1px solid var(--edge);
-    font-family: var(--mono); font-size: .85rem; font-variant-numeric: tabular-nums;
-  }
-  .eval-row:last-of-type { border-bottom: none; }
-  .eval-row.head { color: var(--muted); font-size: .68rem; letter-spacing: .1em; text-transform: uppercase; }
-  .eval-row .name { font-weight: 600; }
-  .eval-row .best { color: var(--accent); }
-  .eval-row .wide { color: var(--warn); }
-  .footnote {
-    font-size: .78rem; color: var(--muted); line-height: 1.6; max-width: 62ch; margin-top: .4rem;
+  .term-btn[aria-pressed="true"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+  .term-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .term {
+    font-family: var(--mono); font-size: .72rem; line-height: 1.5;
+    background: #0B1114; color: #C7D4D2;
+    border: 1px solid var(--edge); border-radius: 3px;
+    padding: .8rem .9rem; max-height: 320px; overflow: auto;
+    white-space: pre-wrap; word-break: break-word;
   }
 
   footer {
@@ -168,7 +169,6 @@
     border-top: 1px solid var(--edge); padding-top: 1rem;
     display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
   }
-
   #freshness { color: var(--accent); }
   #freshness.stale { color: var(--warn); }
 </style>
@@ -179,104 +179,26 @@
   <header>
     <div class="label">Ethos · outbound booking agent</div>
     <div class="runline">
-      <h1>Qwen2.5-1.5B → booking assistant</h1>
+      <h1>Qwen2.5-1.5B → booking agent</h1>
       <span class="pill" id="livepill"><span class="dot"></span><span id="livetext">Connecting</span></span>
     </div>
     <p>
-      A booking agent that phones a business on a client's behalf. It is briefed with the
-      client's details and may say nothing outside that brief. Generated and trained locally.
+      Everything the machine has done or is queued to do, one row each. Click a row for its
+      data; finished work stays tucked away unless you ask for it.
     </p>
   </header>
 
-  <section class="card" id="gen-card" hidden>
-    <div class="prog-head">
-      <div>
-        <div class="label">Dataset · ethos-booking-v2</div>
-        <div class="prog-pct" id="gen-pct">—</div>
-      </div>
-      <div class="prog-steps" id="gen-line">—</div>
+  <section class="card">
+    <div class="queue-head">
+      <div class="label">Queue</div>
+      <button class="toggle" id="showdone" aria-pressed="false">show completed (0)</button>
     </div>
-
-    <div class="track"><div class="fill" id="gen-fill"></div></div>
-
-    <div class="stats">
-      <div class="stat"><span class="label">Conversations</span><span class="v" id="g-convs">—</span><span class="sub" id="g-target">—</span></div>
-      <div class="stat"><span class="label">Examples</span><span class="v" id="g-examples">—</span><span class="sub">turn-level rows</span></div>
-      <div class="stat"><span class="label">Gate pass rate</span><span class="v" id="g-pass">—</span><span class="sub" id="g-failed">—</span></div>
-      <div class="stat"><span class="label">Remaining</span><span class="v" id="g-eta">—</span><span class="sub" id="g-rate">—</span></div>
-    </div>
-  </section>
-
-  <section class="card" id="train-card">
-    <div class="prog-head">
-      <div>
-        <div class="label">Training</div>
-        <div class="prog-pct" id="pct">—</div>
-      </div>
-      <div class="prog-steps" id="stepline">—</div>
-    </div>
-
-    <div>
-      <div class="track" id="track"><div class="fill" id="fill"></div></div>
-      <div class="epoch-row" id="epochrow"></div>
-    </div>
-
-    <div class="stats">
-      <div class="stat"><span class="label">Step</span><span class="v" id="s-step">—</span><span class="sub" id="s-step-sub">—</span></div>
-      <div class="stat"><span class="label">Loss</span><span class="v" id="s-loss">—</span><span class="sub" id="s-loss-sub">—</span></div>
-      <div class="stat"><span class="label">Elapsed</span><span class="v" id="s-elapsed">—</span><span class="sub" id="s-rate">—</span></div>
-      <div class="stat"><span class="label">Remaining</span><span class="v" id="s-eta">—</span><span class="sub" id="s-done">—</span></div>
-    </div>
-
-    <!-- Loss and gradient norm belong to the same run as the numbers above, so they sit in
-         the same box rather than in cards of their own. Three separate panels read as three
-         separate things and made the page longer than the run was interesting. -->
-    <div id="charts" hidden>
-      <div class="chart-head">
-        <div class="label">Training loss</div>
-        <div class="label" id="loss-range">—</div>
-      </div>
-      <div class="chart-scroll"><svg id="losschart" viewBox="0 0 720 250" role="img" aria-label="Training loss over steps"></svg></div>
-
-      <div class="chart-head" style="margin-top:.75rem">
-        <div class="label">Gradient norm</div>
-        <div class="label">log scale · pre-clip</div>
-      </div>
-      <div class="chart-scroll"><svg id="gnchart" viewBox="0 0 720 130" role="img" aria-label="Gradient norm over steps"></svg></div>
-    </div>
-  </section>
-
-  <section class="card" id="eval-card" hidden>
-    <div class="prog-head">
-      <div class="label">Held-out evaluation</div>
-      <div class="label" id="eval-state">—</div>
-    </div>
-    <div id="eval-body"></div>
-    <p class="footnote">
-      Loss on 68 conversations training never saw, against 80 it did. Both fall when a model
-      learns; only the gap between them separates learning from memorising. Lower held-out
-      loss is the better model, whatever the training losses say.
-    </p>
-  </section>
-
-  <section class="card pipe" id="pipeline">
-    <div class="prog-head">
-      <div class="label">Builds</div>
-      <div class="label">published in the order they are made</div>
-    </div>
-    <div id="stages"></div>
-    <p class="footnote">
-      v4 and v6 are one supervised run, snapshotted at the end of epoch 2 and epoch 3.
-      v5 and v7 apply the same preference training to each. Times sharpen as the night goes on:
-      <em>rough</em> is extrapolated from the supervised rate, <em>est.</em> means a preference
-      run has since been timed and its real rate is in use, and an unmarked time is measured
-      from the run itself.
-    </p>
+    <div id="queue"></div>
   </section>
 
   <footer>
     <span id="freshness">—</span>
-    <span id="src">—</span>
+    <span id="src">reads the run logs · refreshes every 30s</span>
   </footer>
 
 </div>
@@ -286,14 +208,12 @@ const NS = "http://www.w3.org/2000/svg";
 const el = id => document.getElementById(id);
 const POLL_MS = 30000;
 
-let lastGood = null;
 let lastFetch = null;
+let queueData = [];
+const open = new Set(JSON.parse(localStorage.getItem("ethos-open") || "[]"));
+let showDone = localStorage.getItem("ethos-showdone") === "1";
 
-const fmtClock = mins => {
-  if (!isFinite(mins)) return "—";
-  const h = Math.floor(mins / 60), m = Math.round(mins % 60);
-  return h ? `${h}h ${String(m).padStart(2, "0")}m` : `${m}m`;
-};
+/* ---------- small helpers ---------- */
 
 function svgAdd(svg, tag, attrs, text) {
   const n = document.createElementNS(NS, tag);
@@ -303,281 +223,339 @@ function svgAdd(svg, tag, attrs, text) {
   return n;
 }
 
-function drawLoss(d) {
-  const svg = el("losschart");
-  svg.replaceChildren();
-  const log = d.log.filter(e => e.loss != null);
-  if (!log.length) return;
-
-  const W = 720, H = 250, L = 46, R = 14, T = 16, B = 30;
-  const maxSteps = d.max_steps || log[log.length - 1].step;
-  const xs = s => L + (s / maxSteps) * (W - L - R);
-
-  const losses = log.map(e => e.loss);
+function lossChart(host, log, maxSteps) {
+  const points = (log || []).filter(e => e.loss != null);
+  if (points.length < 2) return;
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 720 210");
+  const W = 720, H = 210, L = 46, R = 14, T = 14, B = 26;
+  const total = maxSteps || points.at(-1).step;
+  const xs = s => L + (s / total) * (W - L - R);
+  const losses = points.map(e => e.loss);
   const lo = Math.floor(Math.min(...losses) * 10) / 10 - 0.05;
   const hi = Math.ceil(Math.max(...losses) * 10) / 10 + 0.05;
   const ys = v => T + (1 - (Math.min(Math.max(v, lo), hi) - lo) / (hi - lo)) * (H - T - B);
 
-  for (let v = lo; v <= hi + 1e-9; v += 0.1) {
-    svgAdd(svg, "line", { x1: L, y1: ys(v), x2: W - R, y2: ys(v), stroke: "var(--grid)", "stroke-width": 1 });
-    svgAdd(svg, "text", { x: L - 8, y: ys(v) + 3.5, "text-anchor": "end", fill: "var(--muted)", "font-size": 10, "font-family": "var(--mono)" }, v.toFixed(1));
+  for (let v = lo; v <= hi + 1e-9; v += (hi - lo) > 0.6 ? 0.2 : 0.1) {
+    svgAdd(svg, "line", { x1: L, y1: ys(v), x2: W - R, y2: ys(v), stroke: "var(--grid)" });
+    svgAdd(svg, "text", { x: L - 8, y: ys(v) + 3.5, "text-anchor": "end", fill: "var(--muted)",
+                          "font-size": 10, "font-family": "var(--mono)" }, v.toFixed(1));
   }
-
-  const epochs = d.epochs || 1;
-  for (let e = 1; e < epochs; e++) {
-    const s = (maxSteps / epochs) * e;
-    svgAdd(svg, "line", { x1: xs(s), y1: T, x2: xs(s), y2: H - B, stroke: "var(--edge)", "stroke-width": 1, "stroke-dasharray": "3 3" });
-    svgAdd(svg, "text", { x: xs(s) + 5, y: T + 11, fill: "var(--muted)", "font-size": 9.5, "font-family": "var(--mono)" }, `epoch ${e + 1}`);
-  }
-
-  const pts = log.map(e => [xs(e.step), ys(e.loss)]);
+  const pts = points.map(e => [xs(e.step), ys(e.loss)]);
   const path = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
-
-  svgAdd(svg, "path", { d: `${path} L ${pts.at(-1)[0].toFixed(1)} ${H - B} L ${pts[0][0].toFixed(1)} ${H - B} Z`, fill: "var(--accent-soft)", stroke: "none" });
-  svgAdd(svg, "path", { d: path, fill: "none", stroke: "var(--accent)", "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" });
-
-  pts.forEach((p, i) => {
-    const isLast = i === pts.length - 1;
-    svgAdd(svg, "circle", {
-      cx: p[0], cy: p[1], r: isLast ? 4 : 2.2,
-      fill: isLast ? "var(--accent)" : "var(--surface)",
-      stroke: "var(--accent)", "stroke-width": isLast ? 2 : 1.5
-    });
-  });
-
+  svgAdd(svg, "path", { d: `${path} L ${pts.at(-1)[0]} ${H - B} L ${pts[0][0]} ${H - B} Z`,
+                        fill: "var(--accent-soft)", stroke: "none" });
+  svgAdd(svg, "path", { d: path, fill: "none", stroke: "var(--accent)", "stroke-width": 2,
+                        "stroke-linejoin": "round" });
   const lp = pts.at(-1);
-  svgAdd(svg, "text", { x: lp[0] - 6, y: lp[1] - 12, "text-anchor": "end", fill: "var(--text)", "font-size": 12, "font-weight": 600, "font-family": "var(--mono)" }, log.at(-1).loss.toFixed(3));
-
-  svgAdd(svg, "line", { x1: L, y1: H - B, x2: W - R, y2: H - B, stroke: "var(--edge)", "stroke-width": 1 });
-  [0, Math.round(maxSteps * 0.25), Math.round(maxSteps * 0.5), Math.round(maxSteps * 0.75), maxSteps].forEach(s => {
-    svgAdd(svg, "text", { x: xs(s), y: H - B + 16, "text-anchor": "middle", fill: "var(--muted)", "font-size": 10, "font-family": "var(--mono)" }, s);
-  });
+  svgAdd(svg, "circle", { cx: lp[0], cy: lp[1], r: 4, fill: "var(--accent)" });
+  svgAdd(svg, "text", { x: lp[0] - 6, y: lp[1] - 10, "text-anchor": "end", fill: "var(--text)",
+                        "font-size": 12, "font-weight": 600, "font-family": "var(--mono)" },
+         points.at(-1).loss.toFixed(3));
+  svgAdd(svg, "line", { x1: L, y1: H - B, x2: W - R, y2: H - B, stroke: "var(--edge)" });
+  [0, Math.round(total / 2), total].forEach(s =>
+    svgAdd(svg, "text", { x: xs(s), y: H - B + 15, "text-anchor": "middle", fill: "var(--muted)",
+                          "font-size": 10, "font-family": "var(--mono)" }, s));
+  const holder = document.createElement("div");
+  holder.className = "chart-scroll";
+  holder.appendChild(svg);
+  host.appendChild(holder);
 }
 
-function drawGN(d) {
-  const svg = el("gnchart");
-  svg.replaceChildren();
-  const log = d.log.filter(e => e.gn != null);
-  if (!log.length) return;
-
-  const W = 720, H = 130, L = 46, R = 14, T = 14, B = 26;
-  const maxSteps = d.max_steps || log.at(-1).step;
-  const xs = s => L + (s / maxSteps) * (W - L - R);
-
-  const peak = Math.max(10, ...log.map(e => e.gn));
-  const hiDec = Math.ceil(Math.log10(peak));
-  const ys = v => T + (1 - Math.log10(Math.max(v, 1)) / hiDec) * (H - T - B);
-
-  for (let p = 0; p <= hiDec; p++) {
-    const v = Math.pow(10, p);
-    svgAdd(svg, "line", { x1: L, y1: ys(v), x2: W - R, y2: ys(v), stroke: "var(--grid)", "stroke-width": 1 });
-    svgAdd(svg, "text", { x: L - 8, y: ys(v) + 3.5, "text-anchor": "end", fill: "var(--muted)", "font-size": 10, "font-family": "var(--mono)" }, v >= 1000 ? v / 1000 + "k" : v);
+function statGrid(host, cells) {
+  const grid = document.createElement("div");
+  grid.className = "stats";
+  for (const [label, value, sub] of cells) {
+    const cell = document.createElement("div");
+    cell.className = "stat";
+    cell.innerHTML = `<span class="label">${label}</span><span class="v">${value}</span>` +
+                     (sub ? `<span class="sub">${sub}</span>` : "");
+    grid.appendChild(cell);
   }
-
-  if (d.max_grad_norm) {
-    svgAdd(svg, "line", { x1: L, y1: ys(d.max_grad_norm), x2: W - R, y2: ys(d.max_grad_norm), stroke: "var(--accent)", "stroke-width": 1.5, "stroke-dasharray": "4 3" });
-    svgAdd(svg, "text", { x: W - R, y: ys(d.max_grad_norm) - 5, "text-anchor": "end", fill: "var(--accent)", "font-size": 9.5, "font-family": "var(--mono)" }, `clipped to ${d.max_grad_norm.toFixed(1)}`);
-  }
-
-  svgAdd(svg, "path", {
-    d: log.map((e, i) => (i ? "L" : "M") + xs(e.step).toFixed(1) + " " + ys(e.gn).toFixed(1)).join(" "),
-    fill: "none", stroke: "var(--muted)", "stroke-width": 1.5
-  });
-
-  log.filter(e => e.gn > 10).forEach(spike => {
-    const sx = xs(spike.step), sy = ys(spike.gn);
-    svgAdd(svg, "circle", { cx: sx, cy: sy, r: 4, fill: "var(--warn)" });
-    svgAdd(svg, "text", { x: sx + 9, y: sy + 4, fill: "var(--warn)", "font-size": 10.5, "font-weight": 600, "font-family": "var(--mono)" },
-      `${spike.gn >= 1000 ? (spike.gn / 1000).toFixed(1) + "k" : spike.gn.toFixed(0)} @ ${spike.step}`);
-  });
+  host.appendChild(grid);
 }
 
-
-function renderGeneration(d) {
-  const g = d.generation;
-  const generating = d.stage === "generation";
-  el("gen-card").hidden = !g;
-  el("train-card").hidden = !!g && generating && !d.log.length;
-  if (!g) return;
-
-  const pct = g.target ? g.conversations / g.target : 0;
-  el("gen-pct").textContent = (pct * 100).toFixed(1) + "%";
-  el("gen-line").textContent = `${g.conversations} / ${g.target} conversations`;
-  el("gen-fill").style.width = (pct * 100).toFixed(2) + "%";
-  el("g-convs").textContent = g.conversations;
-  el("g-target").textContent = `of ${g.target}`;
-  el("g-examples").textContent = g.examples;
-  el("g-pass").textContent = g.pass_rate == null ? "—" : (g.pass_rate * 100).toFixed(0) + "%";
-  el("g-failed").textContent = `${g.failed} rejected`;
-  el("g-eta").textContent = g.running ? (g.remaining || "—") : "finished";
-  el("g-rate").textContent = g.sec_per_conversation ? `${g.sec_per_conversation.toFixed(0)}s / conv` : "—";
+function progressBar(host, fraction) {
+  const track = document.createElement("div");
+  track.className = "track";
+  track.innerHTML = `<div class="fill" style="width:${(fraction * 100).toFixed(1)}%"></div>`;
+  host.appendChild(track);
 }
 
-function clockAfter(seconds) {
-  const when = new Date(Date.now() + seconds * 1000);
-  const sameDay = when.toDateString() === new Date().toDateString();
-  const time = when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-  return sameDay ? time : time + " +1d";
+function noteEl(host, text) {
+  const p = document.createElement("p");
+  p.className = "note";
+  p.innerHTML = text;
+  host.appendChild(p);
 }
 
-function humanDuration(seconds) {
-  const hours = Math.floor(seconds / 3600), minutes = Math.round((seconds % 3600) / 60);
-  return hours ? `${hours}h ${String(minutes).padStart(2, "0")}m` : `${minutes}m`;
-}
+/* ---------- per-kind detail renderers ---------- */
 
-function renderPipeline(d) {
-  const host = el("stages");
-  host.replaceChildren();
-  for (const stage of d.stages || []) {
-    const row = document.createElement("div");
-    row.className = "stage-row " + (stage.state === "running" ? "live" : stage.state);
+const RENDER = {
+  generation(host, item) {
+    const g = item.generation || {};
+    progressBar(host, (g.conversations || 0) / (g.target || 1));
+    statGrid(host, [
+      ["Conversations", g.conversations ?? "—", `of ${g.target ?? "—"}`],
+      ["Examples", g.examples ?? "—", "turn-level rows"],
+      ["Gate pass", g.pass_rate != null ? (g.pass_rate * 100).toFixed(0) + "%" : "—",
+       `${g.failed ?? 0} rejected`],
+    ]);
+  },
 
-    const mark = stage.state === "done" ? "✓" : stage.state === "running" ? "▸" : "·";
-    let when;
-    if (stage.state === "done") {
-      // A finished build's useful fact is what it scored, not that it finished.
-      when = stage.score
-        ? `held-out <strong>${stage.score.heldout_loss.toFixed(3)}</strong>`
-        : "done";
-    } else if (stage.eta == null) {
-      when = "—";
-    } else {
-      when = `${clockAfter(stage.eta)} · ${humanDuration(stage.eta)}`;
-      // Say how much to trust the number, not just what it is.
-      const tag = { guess: "rough", calibrated: "est." }[stage.confidence];
-      if (tag) when = `<em>${tag}</em> ${when}`;
+  sft(host, item) {
+    if (item.score) {
+      statGrid(host, [
+        ["Held-out loss", item.score.heldout_loss.toFixed(3), "lower is better"],
+        ["Train loss", item.score.train_loss.toFixed(3), ""],
+        ["Gap", (item.score.gap >= 0 ? "+" : "") + item.score.gap.toFixed(3), "memorisation signal"],
+      ]);
     }
+    lossChart(host, item.log, null);
+  },
 
-    row.innerHTML =
-      `<span class="mark">${mark}</span>` +
-      `<span>${stage.label}<br><span class="release">${stage.release}` +
-      `${stage.published ? "" : " (unpublished)"} · ${stage.detail}</span></span>` +
-      `<span class="state">${stage.state}</span>` +
-      `<span class="when">${when}</span>`;
+  dpo(host, item) {
+    const d = item.dpo || {};
+    if (d.training) {
+      const t = d.training;
+      progressBar(host, t.step / t.max_steps);
+      statGrid(host, [
+        ["Step", t.step, `of ${t.max_steps}`],
+        ["Rate", t.sec_per_step.toFixed(1) + "s", "per optimizer step"],
+        ["Remaining", t.remaining, ""],
+      ]);
+      noteEl(host, "Each step covers 8 accumulated pairs, forward and backward — " +
+                   "precompute items were single forwards, which is why the rates differ so much.");
+    } else if (d.precompute) {
+      const pc = d.precompute;
+      progressBar(host, pc.step / pc.max_steps);
+      statGrid(host, [
+        ["Reference log-probs", pc.step, `of ${pc.max_steps} pairs`],
+        ["Rate", pc.sec_per_step.toFixed(1) + "s", "per pair"],
+        ["Remaining", pc.remaining, "then 178 training steps"],
+      ]);
+    }
+    if (item.score) {
+      noteEl(host, `Held-out loss <code>${item.score.heldout_loss.toFixed(3)}</code> — read this ` +
+                   "with care: DPO optimises the chosen-vs-rejected margin, not likelihood, so a " +
+                   "worse held-out loss can accompany a better model. Preference accuracy below is " +
+                   "the judgement that counts.");
+    }
+    if ((d.losses || []).length >= 2) lossChart(host, d.losses, null);
+  },
+
+  asr(host, item) {
+    const a = item.asr || {};
+    if (a.transcript) {
+      const q = document.createElement("div");
+      q.className = "transcript";
+      q.textContent = a.transcript;
+      host.appendChild(q);
+      noteEl(host, "Whisper medium.en, fp32 on purpose — half precision on MPS has a history of " +
+                   "silently wrong transcripts, and a wrong phone number is the failure this " +
+                   "system exists to prevent.");
+    } else {
+      noteEl(host, "Runs the moment the GPU frees: transcribes a generated call line " +
+                   "(<code>audio-samples/1.mp3</code>) as the first end-to-end test of the " +
+                   "speech-to-text component from docs/CALLS.md.");
+    }
+  },
+
+  eval(host, item) {
+    const scores = item.scores || {};
+    const names = Object.keys(scores);
+    if (!names.length) {
+      noteEl(host, "Scores v4, v6 and v5 on the 9 conversations nothing trained on. " +
+                   "The gap between train and held-out loss is what separates learning from memorising.");
+      return;
+    }
+    const bestHeld = Math.min(...names.map(n => scores[n].heldout_loss));
+    const widestGap = Math.max(...names.map(n => scores[n].gap));
+    const table = document.createElement("table");
+    table.innerHTML = "<tr><th>model</th><th>train</th><th>held-out</th><th>gap</th></tr>" +
+      names.map(n => {
+        const s = scores[n];
+        return `<tr><td>${n}</td><td>${s.train_loss.toFixed(3)}</td>` +
+               `<td class="${s.heldout_loss === bestHeld ? "best" : ""}">${s.heldout_loss.toFixed(3)}</td>` +
+               `<td class="${s.gap === widestGap ? "warn" : ""}">${s.gap >= 0 ? "+" : ""}${s.gap.toFixed(3)}</td></tr>`;
+      }).join("");
+    host.appendChild(table);
+    noteEl(host, "Lowest held-out loss is the model that generalises best, whatever the training " +
+                 "losses say. A wide gap is not a worse score — it is the signature of leaning on " +
+                 "data seen before.");
+  },
+
+  prefeval(host, item) {
+    const prefs = item.prefs || {};
+    const names = Object.keys(prefs);
+    if (!names.length) {
+      noteEl(host, "The metric that actually judges DPO: given a held-out conversation, does the " +
+                   "model prefer the response that copies the brief over one with a corrupted " +
+                   "detail? Reported overall and broken down by what was corrupted — phone digits " +
+                   "being the failure that matters most.");
+      return;
+    }
+    const kinds = [...new Set(names.flatMap(n => Object.keys(prefs[n].by_corruption || {})))];
+    const bestAcc = Math.max(...names.map(n => prefs[n].accuracy ?? 0));
+    const table = document.createElement("table");
+    table.innerHTML =
+      `<tr><th>model</th><th>accuracy</th><th>margin</th>${kinds.map(k => `<th>${k}</th>`).join("")}</tr>` +
+      names.map(n => {
+        const s = prefs[n];
+        return `<tr><td>${n}</td>` +
+          `<td class="${s.accuracy === bestAcc ? "best" : ""}">${(s.accuracy * 100).toFixed(1)}%</td>` +
+          `<td>${s.mean_margin >= 0 ? "+" : ""}${(s.mean_margin ?? 0).toFixed(3)}</td>` +
+          kinds.map(k => {
+            const rate = (s.by_corruption || {})[k];
+            return `<td>${rate != null ? (rate * 100).toFixed(0) + "%" : "—"}</td>`;
+          }).join("") + "</tr>";
+      }).join("");
+    host.appendChild(table);
+  },
+
+  hpsearch(host, item) {
+    const s = item.search || {};
+    if (!s.evaluated) {
+      noteEl(host, "Six candidates per generation climb a ladder — everyone trains on 20 " +
+                   "conversations, the best three on 60, the best two on all 189 — so a bad " +
+                   "configuration costs twelve minutes instead of two hours. Three generations, " +
+                   "roughly 21 hours.");
+      return;
+    }
+    statGrid(host, [
+      ["Evaluated", s.evaluated, "candidate runs"],
+      ["Best so far", s.best ? s.best.score.toFixed(4) : "—",
+       s.best ? `at ${s.best.conversations} convs` : ""],
+      ["Phase", s.phase || "—", ""],
+    ]);
+    if (s.best && s.best.candidate) {
+      const c = s.best.candidate;
+      noteEl(host, `Leader: rank ${c.lora_rank}, α×${c.lora_alpha_ratio}, dropout ${c.lora_dropout}, ` +
+                   `lr ${c.learning_rate}, accum ${c.gradient_accumulation_steps}` +
+                   `${c.attention_only ? ", attention-only" : ""}. A ladder score ranks — it does ` +
+                   "not predict the full-run loss.");
+    }
+  },
+};
+
+/* ---------- queue rendering ---------- */
+
+const MARKS = { done: "✓", running: "▸", waiting: "·", partial: "◐", failed: "✕" };
+
+function renderQueue() {
+  const host = el("queue");
+  host.replaceChildren();
+
+  const finished = queueData.filter(i => i.state === "done").length;
+  const btn = el("showdone");
+  btn.textContent = (showDone ? "hide completed" : "show completed") + ` (${finished})`;
+  btn.setAttribute("aria-pressed", String(showDone));
+
+  for (const item of queueData) {
+    if (item.state === "done" && !showDone) continue;
+
+    const row = document.createElement("div");
+    row.className = `item ${item.state}` + (open.has(item.id) ? " open" : "");
+
+    const head = document.createElement("button");
+    head.className = "item-head";
+    head.setAttribute("aria-expanded", String(open.has(item.id)));
+    head.innerHTML =
+      `<span class="mark">${MARKS[item.state] || "·"}</span>` +
+      `<span class="t">${item.title}<small>${item.sub || ""}</small></span>` +
+      `<span class="state">${item.state}</span>` +
+      `<span class="chev">›</span>`;
+    head.addEventListener("click", () => {
+      open.has(item.id) ? open.delete(item.id) : open.add(item.id);
+      localStorage.setItem("ethos-open", JSON.stringify([...open]));
+      renderQueue();
+    });
+    row.appendChild(head);
+
+    if (open.has(item.id)) {
+      const body = document.createElement("div");
+      body.className = "item-body";
+      (RENDER[item.kind] || (() => {}))(body, item);
+      if (!body.children.length) noteEl(body, "Nothing recorded for this yet.");
+      addTerminal(body, item.id);
+      row.appendChild(body);
+    }
     host.appendChild(row);
   }
-}
 
-function renderEval(d) {
-  const e = d.evaluation;
-  el("eval-card").hidden = !e;
-  if (!e) return;
-
-  el("eval-state").textContent = e.running
-    ? (e.current ? `scoring ${e.current} · ${e.current_split || ""} ${e.current_progress || ""}` : "running")
-    : "finished";
-
-  const body = el("eval-body");
-  body.replaceChildren();
-  const header = document.createElement("div");
-  header.className = "eval-row head";
-  header.innerHTML = "<span>model</span><span>train</span><span>held-out</span><span>gap</span>";
-  body.appendChild(header);
-
-  const results = e.results || [];
-  // The lowest held-out loss is the model that generalises best; the widest gap is the one
-  // that leaned hardest on having seen the data before. Marking both stops the table being
-  // read as "lower numbers better" across the board, which for the gap column it is not.
-  const bestHeld = Math.min(...results.map(r => r.heldout));
-  const widestGap = Math.max(...results.map(r => r.gap));
-
-  for (const r of results) {
-    const row = document.createElement("div");
-    row.className = "eval-row";
-    row.innerHTML =
-      `<span class="name">${r.model}</span>` +
-      `<span>${r.train.toFixed(3)}</span>` +
-      `<span class="${r.heldout === bestHeld ? "best" : ""}">${r.heldout.toFixed(3)}</span>` +
-      `<span class="${r.gap === widestGap ? "wide" : ""}">${r.gap >= 0 ? "+" : ""}${r.gap.toFixed(3)}</span>`;
-    body.appendChild(row);
-  }
-  if (!results.length) {
-    const row = document.createElement("div");
-    row.className = "eval-row";
-    row.innerHTML = "<span>—</span><span>waiting for the first result</span>";
-    body.appendChild(row);
+  if (!host.children.length) {
+    const p = document.createElement("p");
+    p.className = "note";
+    p.style.padding = ".5rem .3rem";
+    p.textContent = `All ${finished} items are complete — use "show completed" to see them.`;
+    host.appendChild(p);
   }
 }
 
-function render(d) {
-  d.log = d.log || [];
-  renderEval(d);
-  // Charts of an empty run read as a broken dashboard rather than a stage that has not
-  // started, so they stay out of the layout until there is something to plot.
-  const hasMetrics = d.log.length > 0;
-  el("charts").hidden = !hasMetrics;
-  renderGeneration(d);
-  renderPipeline(d);
-  const maxSteps = d.max_steps || 1;
-  const step = d.step ?? d.checkpoint_step ?? 0;
-  const pct = step / maxSteps;
+/* ---------- terminal view ---------- */
 
-  el("pct").textContent = (pct * 100).toFixed(1) + "%";
-  el("stepline").textContent = `step ${step} / ${maxSteps}`;
-  el("fill").style.width = (pct * 100).toFixed(2) + "%";
+const termOpen = new Set(JSON.parse(localStorage.getItem("ethos-term") || "[]"));
 
-  const track = el("track"), epochRow = el("epochrow");
-  track.querySelectorAll(".tick").forEach(t => t.remove());
-  epochRow.replaceChildren();
+function addTerminal(host, id) {
+  const btn = document.createElement("button");
+  btn.className = "term-btn";
+  btn.setAttribute("aria-pressed", String(termOpen.has(id)));
+  btn.textContent = termOpen.has(id) ? "hide terminal" : "show terminal";
+  host.appendChild(btn);
 
-  if (d.save_steps) {
-    for (let s = d.save_steps; s <= step && s < maxSteps; s += d.save_steps) {
-      const t = document.createElement("div");
-      t.className = "tick ckpt";
-      t.style.left = (s / maxSteps * 100) + "%";
-      t.title = `checkpoint-${s}`;
-      track.appendChild(t);
-    }
-  }
+  const pre = document.createElement("pre");
+  pre.className = "term";
+  pre.hidden = !termOpen.has(id);
+  pre.textContent = "…";
+  host.appendChild(pre);
 
-  const epochs = d.epochs || 1;
-  for (let e = 1; e < epochs; e++) {
-    const s = Math.round((maxSteps / epochs) * e);
-    const t = document.createElement("div");
-    t.className = "tick";
-    t.style.left = (s / maxSteps * 100) + "%";
-    track.appendChild(t);
-    const lab = document.createElement("span");
-    lab.style.left = (s / maxSteps * 100) + "%";
-    lab.textContent = `epoch ${e + 1}`;
-    epochRow.appendChild(lab);
-  }
+  const load = async () => {
+    if (!document.body.contains(pre)) { termLoaders.delete(id); return; }
+    try {
+      const response = await fetch(`/terminal?id=${encodeURIComponent(id)}`, { cache: "no-store" });
+      const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
+      pre.textContent = await response.text();
+      // Follow the tail like a terminal would, but stop following the moment the reader
+      // scrolls up to look at something.
+      if (atBottom) pre.scrollTop = pre.scrollHeight;
+    } catch { pre.textContent = "(could not load the log)"; }
+  };
+  termLoaders.set(id, load);
+  if (termOpen.has(id)) load();
 
-  const losses = d.log.filter(e => e.loss != null);
-  const last = losses.at(-1), first = losses[0];
-
-  el("s-step").textContent = step;
-  el("s-step-sub").textContent = `of ${maxSteps}`;
-  el("s-loss").textContent = last ? last.loss.toFixed(3) : "—";
-  el("s-loss-sub").textContent = last ? `from ${first.loss.toFixed(2)} · step ${last.step}` : "awaiting checkpoint";
-  el("s-elapsed").textContent = d.elapsed || "—";
-  el("s-rate").textContent = d.sec_per_step ? `${d.sec_per_step.toFixed(1)}s / step` : "—";
-  el("s-eta").textContent = d.remaining ? d.remaining : (d.sec_per_step ? "~" + fmtClock((maxSteps - step) * d.sec_per_step / 60) : "—");
-  el("s-done").textContent = `epoch ${(step / (maxSteps / epochs)).toFixed(2)} of ${epochs}`;
-  el("loss-range").textContent = losses.length ? `steps ${first.step}–${last.step}` : "—";
-
-  const pill = el("livepill");
-  const live = ["training", "generation", "evaluating"].includes(d.stage);
-  pill.classList.toggle("stopped", !live);
-  el("livetext").textContent =
-    d.stage === "training" ? "Training" : d.stage === "generation" ? "Generating"
-    : d.stage === "evaluating" ? "Evaluating" : "Idle";
-
-  el("src").textContent = d.stage === "generation"
-    ? "dataset generation · read from the run log"
-    : d.checkpoint ? `metrics from ${d.checkpoint} · step from log tail` : "awaiting first checkpoint";
-
-  if (hasMetrics) {
-    drawLoss(d);
-    drawGN(d);
-  }
+  btn.addEventListener("click", event => {
+    event.stopPropagation();
+    const now = !termOpen.has(id);
+    now ? termOpen.add(id) : termOpen.delete(id);
+    localStorage.setItem("ethos-term", JSON.stringify([...termOpen]));
+    btn.setAttribute("aria-pressed", String(now));
+    btn.textContent = now ? "hide terminal" : "show terminal";
+    pre.hidden = !now;
+    if (now) load();
+  });
 }
+
+// Open terminals refresh with the poll, so a live log scrolls rather than freezes.
+const termLoaders = new Map();
+setInterval(() => {
+  for (const [id, load] of termLoaders) {
+    if (termOpen.has(id)) load();
+  }
+}, POLL_MS);
+
+el("showdone").addEventListener("click", () => {
+  showDone = !showDone;
+  localStorage.setItem("ethos-showdone", showDone ? "1" : "0");
+  renderQueue();
+});
+
+/* ---------- polling ---------- */
 
 function markFreshness() {
   if (!lastFetch) return;
   const age = Math.round((Date.now() - lastFetch) / 1000);
   const node = el("freshness");
-  node.textContent = age < 5 ? "updated just now" : `updated ${age}s ago · refreshes every ${POLL_MS / 1000}s`;
+  node.textContent = age < 5 ? "updated just now" : `updated ${age}s ago`;
   node.classList.toggle("stale", age > POLL_MS / 1000 * 2.5);
 }
 
@@ -585,13 +563,19 @@ async function poll() {
   try {
     const response = await fetch("/data.json", { cache: "no-store" });
     if (!response.ok) throw new Error(response.status);
-    lastGood = await response.json();
+    const data = await response.json();
     lastFetch = Date.now();
-    render(lastGood);
+    queueData = data.queue || [];
+
+    const running = queueData.find(i => i.state === "running");
+    const pill = el("livepill");
+    pill.classList.toggle("stopped", !running);
+    el("livetext").textContent = running ? running.title.split(" — ")[0] : "Idle";
+
+    renderQueue();
   } catch (error) {
-    const node = el("freshness");
-    node.classList.add("stale");
-    node.textContent = "server unreachable — retrying";
+    el("freshness").classList.add("stale");
+    el("freshness").textContent = "server unreachable — retrying";
   }
   markFreshness();
 }
