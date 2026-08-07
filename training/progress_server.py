@@ -327,7 +327,10 @@ def parse_dpo(log: Path) -> dict:
 
 
 def parse_asr(log: Path) -> dict:
-    text = tail_of(log)
+    # Reads the whole file rather than a byte-limited tail. It is a dedicated per-stage
+    # log now (small by construction) — a tail read is exactly what silently dropped this
+    # section when it used to share a growing multi-stage file with everything after it.
+    text = tail_of(log, size=50_000_000)
     if "running the ASR smoke test" not in text:
         return {}
     section = text.split("running the ASR smoke test", 1)[1]
@@ -337,7 +340,8 @@ def parse_asr(log: Path) -> dict:
     else:
         finished = False
     lines = [l for l in section.splitlines()
-             if l.strip() and not l.startswith("[") and "model:" not in l]
+             if l.strip() and not l.startswith("[") and "model:" not in l
+             and not PROGRESS_LINE.search(l)]
     return {"finished": finished, "transcript": " ".join(lines).strip()}
 
 
@@ -542,19 +546,33 @@ def collect(output: Path, log: Path, pattern: str,
 # Which raw log backs each queue item. The terminal view serves these verbatim — the
 # parsed cards above are a summary, and a summary should always be checkable against the
 # thing it summarised.
+# Each item points at its OWN file. They used to share logs/after_v5.log, and a byte-
+# limited tail read on that shared, growing file silently lost the ASR section once
+# later stages pushed it past the read window — the test had actually passed, and the
+# dashboard reported it as never having run. One dead end is enough; every future run
+# writes one file per stage (see training/run_pipeline.sh) rather than appending several
+# stages into one file that only gets larger.
 ITEM_LOGS = {
     "dataset": Path("v2-generate.log"),
     "v4": Path("v4-train.log"),
     "v6": Path("logs/v6-resume.log"),
     "v5": Path("logs/v5-dpo.log"),
-    "asr": Path("logs/after_v5.log"),
-    "heldout": Path("logs/heldout_bf16.log"),
-    "prefs": Path("logs/after_v5.log"),
+    "asr": Path("logs/asr_result.log"),
+    "heldout": Path("logs/heldout_full.log"),
+    "prefs": Path("logs/preference_margin.log"),
+    "composite": Path("logs/composite.log"),
     "search": Path("logs/hpsearch_run.log"),
 }
 
 
-def terminal_tail(item: str, size: int = 16384) -> str:
+# tqdm progress lines — "  43%|####      | 611M/1.42G [00:55<01:13, 8.3MiB/s]" — are
+# real content for a currently-training job (that IS the useful signal) but pure noise
+# once a job has finished, where hundreds of superseded download/step updates would
+# otherwise crowd the actual result out of the last-200-lines window.
+PROGRESS_LINE = re.compile(r"\d+%\|.*\||[\d.]+[kMG]?i?B/s")
+
+
+def terminal_tail(item: str, size: int = 1_000_000) -> str:
     """Last stretch of the item's log, carriage returns unrolled so tqdm history reads
     as lines rather than one endlessly-overwritten one."""
     path = ITEM_LOGS.get(item)
@@ -563,7 +581,7 @@ def terminal_tail(item: str, size: int = 16384) -> str:
     if not path.exists():
         return f"({path} does not exist yet)"
     text = tail_of(path, size)
-    lines = [l for l in text.splitlines() if l.strip()]
+    lines = [l for l in text.splitlines() if l.strip() and not PROGRESS_LINE.search(l)]
     return "\n".join(lines[-200:]) or "(empty)"
 
 

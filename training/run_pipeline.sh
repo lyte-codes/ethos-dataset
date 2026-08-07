@@ -125,24 +125,77 @@ preference training began."
 # training on top of it would cost hours to answer a question about a model that would never
 # be shipped.
 
+# A stage from here on is a single foreground command with no retry, so a manual kill
+# (pausing for an investigation, say) makes it exit non-zero and — because there is no
+# set -e — the script would otherwise fall straight through to the next stage and lie
+# about having finished. This wrapper is what stopped that from happening quietly a
+# second time: it checks the real exit code and stops the chain on a genuine failure,
+# while still letting an already-satisfied stage (its output file already exists) skip
+# cleanly on a re-run.
+stage() {
+    local name="$1" output="$2"
+    shift 2
+    if [ -n "$output" ] && [ -e "$output" ]; then
+        echo "[$(date +%H:%M)] $name — already done, skipping"
+        return 0
+    fi
+    echo "[$(date +%H:%M)] $name — running"
+    # Each stage gets its OWN log file. They used to share one growing file, and a
+    # byte-limited tail read on that file silently lost an early stage's section once
+    # later stages pushed it past the read window — the dashboard reported a test that
+    # had actually passed as never having run.
+    if "$@" > "logs/${name}.log" 2>&1; then
+        echo "[$(date +%H:%M)] $name — done"
+        return 0
+    else
+        echo "[$(date +%H:%M)] $name — FAILED or interrupted (see logs/${name}.log)" >&2
+        return 1
+    fi
+}
+
 # --- measure generalisation -------------------------------------------------------
 # Behaviour on five calls is coarse. This is the direct test of whether the extra epoch
 # taught the task or the training set: held-out loss against loss on data it did see.
-echo "[$(date +%H:%M)] held-out loss for all four"
-python3 training/eval_heldout.py \
-    --adapter base: \
-    --adapter v4:checkpoints/ethos-v4 \
-    --adapter v5:checkpoints/ethos-v5 \
-    --adapter v6:checkpoints/ethos-v6 \
-    --out data/heldout_eval.json 2>&1 | tee logs/heldout.log
+stage heldout data/heldout_eval.json \
+    python3 training/eval_heldout.py \
+        --adapter base: \
+        --adapter v4:checkpoints/ethos-v4 \
+        --adapter v5:checkpoints/ethos-v5 \
+        --adapter v6:checkpoints/ethos-v6 \
+        --out data/heldout_eval.json
+
+# --- speech to text -----------------------------------------------------------------
+# The first end-to-end test of the component in docs/CALLS.md that this pipeline does
+# not otherwise exercise. Needs the GPU briefly, so it runs here, between the two
+# eval_* stages rather than beside either of them.
+stage asr "" \
+    python3 training/transcribe.py audio-samples/1.mp3
+
+# --- does it prefer the brief? -------------------------------------------------------
+# Binary "did it pick the right one" saturates near ceiling almost immediately, even for
+# the untrained base model — copying a detail already stated in the conversation is a
+# general capability transformers get from pretraining, not something DPO specifically
+# installs. eval_preference.py's own accuracy-based "best" line reflects that ceiling
+# honestly; composite_score.py below reads the margin instead, which does not saturate.
+stage prefs data/preference_eval.json \
+    python3 training/eval_preference.py \
+        --adapter base: \
+        --adapter v4:checkpoints/ethos-v4 \
+        --adapter v6:checkpoints/ethos-v6 \
+        --adapter v5:checkpoints/ethos-v5 \
+        --out data/preference_eval.json
+
+# --- one score for both training phases ----------------------------------------------
+stage composite data/composite_score.json \
+    python3 training/composite_score.py
 
 # --- compare ----------------------------------------------------------------------
-echo "[$(date +%H:%M)] scoring all four on identical calls"
-python3 training/compare_models.py \
-    --model v4:checkpoints/ethos-v4 \
-    --model v5:checkpoints/ethos-v5 \
-    --model v6:checkpoints/ethos-v6 \
-    --out data/model_comparison.json 2>&1 | tee logs/compare.log
+stage compare data/model_comparison.json \
+    python3 training/compare_models.py \
+        --model v4:checkpoints/ethos-v4 \
+        --model v5:checkpoints/ethos-v5 \
+        --model v6:checkpoints/ethos-v6 \
+        --out data/model_comparison.json
 
 # --- recordings -------------------------------------------------------------------
 # One call per model, rendered to audio, so the difference can be heard rather than only
@@ -159,5 +212,16 @@ for pair in "v4:checkpoints/ethos-v4" "v6:checkpoints/ethos-v6" \
             --out-dir data/audio >> "logs/call-${name}.log" 2>&1 \
         && echo "[$(date +%H:%M)] recorded $name"
 done
+
+# --- hyperparameter search ----------------------------------------------------------
+# Last, deliberately: everything above is informative in minutes, this is the ~21h
+# item. Not run through the stage() helper above — its own journal (logs/hpsearch.jsonl)
+# already caches per-candidate, per-rung results, so a re-run resumes correctly on its
+# own even after this stage was interrupted, which a simple output-file check cannot
+# express as cleanly as the search's own resume logic already does.
+echo "[$(date +%H:%M)] starting hyperparameter search"
+python3 training/search_hyperparameters.py --population 6 --generations 3 \
+    > logs/hpsearch_run.log 2>&1
+echo "[$(date +%H:%M)] hyperparameter search finished"
 
 echo "[$(date +%H:%M)] pipeline finished"
