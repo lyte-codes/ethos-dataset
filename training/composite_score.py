@@ -22,13 +22,17 @@ them as fluency and faithfulness. Every number in that combination is derived or
 mathematically defined rather than picked by feel — see the docstring on each function
 for where its default comes from and why:
 
-- **Corruption weighting is macro, not by frequency.** Weighting by how often each
-  corruption appears in the training data would let the most common one dominate the
-  score — in this dataset `unearned_name` is 41% of pairs and `phone` is 12%, so a
-  frequency-weighted average would grade mostly on whether the model gets a name right
-  while barely counting whether it invents a number. Equal weight per corruption *kind*
-  corrects for that: every distinct failure mode counts once, regardless of how the
-  training corpus happened to be distributed.
+- **Faithfulness is built from margin, not raw accuracy — and both are macro, not by
+  frequency.** Binary accuracy on these pairs saturates near ceiling for every model
+  measured, *including the untrained base model*: preferring a number already stated in
+  the conversation over a different one is a general copying capability transformers get
+  from pretraining, not something DPO specifically installs, so "did it pick the right
+  one" stops discriminating almost immediately. The margin — how much more likely the
+  right answer is than the wrong one — keeps moving where accuracy does not, and tracks
+  training investment cleanly (base +1.30, v4 +1.45, v6 +1.54, v5 +2.01, measured). Both
+  margin and accuracy are macro-averaged per corruption kind rather than pooled, for the
+  same reason: `unearned_name` is 41% of the training pairs and `phone` is 12%, so a
+  pooled score would grade mostly on names and barely count invented numbers.
 
 - **The phone floor is chance, adjusted upward only if the untrained model already
   beats chance.** A two-way preference judgment has a mathematically defined floor —
@@ -82,16 +86,34 @@ def fluency_scores(heldout: dict) -> dict[str, float]:
     }
 
 
-def faithfulness_score(entry: dict) -> tuple[float, dict[str, float]]:
-    """Macro-average across corruption kinds actually observed for this model — each
-    kind counts once, so the training corpus's uneven mix (below) cannot let the most
-    common failure drown out the rarest, costliest one."""
-    by_kind = entry.get("by_corruption") or {}
-    overall = entry.get("accuracy")
-    if overall is None or not by_kind:
-        return (round(100 * overall, 1) if overall is not None else float("nan")), by_kind
-    score = 100 * sum(by_kind.values()) / len(by_kind)
-    return round(score, 1), by_kind
+def macro_margin(entry: dict) -> float | None:
+    """Mean margin across corruption kinds, each kind weighted equally rather than by
+    how often it appears in the training pairs — see the module docstring."""
+    by_kind = entry.get("margin_by_corruption") or {}
+    if not by_kind:
+        return entry.get("mean_margin")  # older eval_preference.json without the breakdown
+    return sum(by_kind.values()) / len(by_kind)
+
+
+def faithfulness_scores(preference: dict) -> dict[str, float]:
+    """0-100, base-relative — same derivation as fluency_scores, applied to macro-margin
+    instead of loss. Accuracy alone cannot do this job: it is saturated at or near
+    ceiling for every model on this pair set, including the untrained base, so a
+    base-relative scale built from accuracy would collapse to near-zero span. Margin has
+    not saturated, so it is what the scale is built from."""
+    margins = {name: macro_margin(entry) for name, entry in preference.items()}
+    margins = {name: value for name, value in margins.items() if value is not None}
+    if "base" not in margins or len(margins) < 2:
+        return {}
+    base_margin = margins["base"]
+    best_margin = max(margins.values())
+    span = best_margin - base_margin
+    if span <= 0:
+        return {name: 0.0 for name in margins}
+    return {
+        name: round(max(0.0, min(100.0, 100 * (value - base_margin) / span)), 1)
+        for name, value in margins.items()
+    }
 
 
 def phone_floor(heldout_names_with_pref: dict) -> tuple[float, str]:
@@ -124,6 +146,7 @@ def main() -> int:
     heldout = json.loads(args.heldout.read_text()) if args.heldout.exists() else {}
     preference = json.loads(args.preference.read_text()) if args.preference.exists() else {}
     fluency = fluency_scores(heldout)
+    faithfulness = faithfulness_scores(preference)
     faithfulness_weight = 1 - args.fluency_weight
 
     floor, floor_reason = (args.phone_floor, "explicit --phone-floor override") \
@@ -139,17 +162,17 @@ def main() -> int:
     # there is no non-arbitrary number to cap against, so a capped model is honestly
     # reported as unscored rather than pinned to a made-up constant.
     base_composite = None
-    if "base" in fluency and "base" in preference:
-        base_faith, _ = faithfulness_score(preference["base"])
+    if "base" in fluency and "base" in faithfulness:
         base_composite = round(args.fluency_weight * fluency["base"]
-                               + faithfulness_weight * base_faith, 1)
+                               + faithfulness_weight * faithfulness["base"], 1)
 
     results = {}
-    print(f"{'model':<8} {'fluency':>9} {'faithful':>10} {'composite':>11}   by corruption kind")
+    print(f"{'model':<8} {'fluency':>9} {'faithful':>10} {'composite':>11}   accuracy by corruption kind")
     for name in names:
         f_score = fluency.get(name)
-        pref_entry = preference.get(name)
-        faith_score, breakdown = faithfulness_score(pref_entry) if pref_entry else (None, {})
+        pref_entry = preference.get(name) or {}
+        faith_score = faithfulness.get(name)
+        breakdown = pref_entry.get("by_corruption") or {}
 
         phone_rate = breakdown.get("phone")
         capped = phone_rate is not None and phone_rate < floor

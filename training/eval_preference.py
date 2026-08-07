@@ -132,6 +132,7 @@ def main() -> int:
 
         correct, margins = 0, []
         by_kind = defaultdict(lambda: [0, 0])
+        margin_by_kind = defaultdict(list)
         for index, pair in enumerate(pairs, 1):
             if index % 25 == 0:
                 print(f"    {name}: {index}/{len(pairs)}", flush=True)
@@ -146,7 +147,9 @@ def main() -> int:
             if good > bad:
                 correct += 1
                 by_kind[kind][0] += 1
-            margins.append(good - bad)
+            margin = good - bad
+            margins.append(margin)
+            margin_by_kind[kind].append(margin)
 
         total = len(margins)
         results[name] = {
@@ -154,6 +157,14 @@ def main() -> int:
             "accuracy": round(correct / total, 4) if total else None,
             "mean_margin": round(sum(margins) / total, 4) if total else None,
             "by_corruption": {k: round(v[0] / v[1], 3) for k, v in sorted(by_kind.items()) if v[1]},
+            # Margin per kind, not just pooled: accuracy on these pairs is at or near
+            # ceiling for every model including untrained base (copying a number already
+            # stated in context is a general pretraining capability, not something DPO
+            # specifically installs), so margin is the signal that actually discriminates —
+            # and pooling it would let the most frequent corruption kind dominate for the
+            # same reason accuracy was macro-averaged rather than pooled.
+            "margin_by_corruption": {k: round(sum(v) / len(v), 4)
+                                     for k, v in sorted(margin_by_kind.items()) if v},
         }
         print(f"{name:>6}  prefers the right answer {correct}/{total} "
               f"({correct / total:.1%})  mean margin {sum(margins) / total:+.4f}", flush=True)

@@ -27,20 +27,33 @@ SUBSTITUTE_NAMES = [
 
 
 def corrupt_phone(text: str, rng: random.Random) -> str | None:
-    """Swap the digits for different ones, keeping the original formatting."""
+    """Swap trailing digits for different ones, keeping the leading digits and formatting.
+
+    Only the last three digits move. Randomising every digit — including the leading one —
+    let roughly 90% of "corrupted" numbers stop starting with 0, which is detectable from
+    the digit string alone with no reference to the brief or the conversation at all: every
+    real UK number in this dataset starts with 0, so a malformed one gives itself away by
+    shape. That measured as ~100% phone accuracy for the untrained base model too, which is
+    the tell that the pair was not testing what it was supposed to. Perturbing only the tail
+    matches the near-miss logic in training/scrub.py, which got this right the first time —
+    the corrupted number has to still look like a real one, or nothing has to know the brief
+    to reject it.
+    """
     match = PHONE.search(text)
     if not match:
         return None
     original = match.group()
-    corrupted, changed = [], False
-    for character in original:
-        if character.isdigit():
-            replacement = str(rng.randint(0, 9))
-            if replacement != character:
-                changed = True
-            corrupted.append(replacement)
-        else:
-            corrupted.append(character)
+    digit_positions = [i for i, character in enumerate(original) if character.isdigit()]
+    if len(digit_positions) < 4:
+        return None
+    changeable = digit_positions[-3:]
+
+    corrupted, changed = list(original), False
+    for position in changeable:
+        replacement = str(rng.randint(0, 9))
+        if replacement != corrupted[position]:
+            changed = True
+        corrupted[position] = replacement
     if not changed:
         return None
     return text[:match.start()] + "".join(corrupted) + text[match.end():]
