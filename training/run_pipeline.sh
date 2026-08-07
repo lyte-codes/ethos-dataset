@@ -189,6 +189,10 @@ stage prefs data/preference_eval.json \
 stage composite data/composite_score.json \
     python3 training/composite_score.py
 
+# --- the same, but comparable across runs instead of only within this batch ----------
+stage composite_absolute data/composite_score_absolute.json \
+    python3 training/composite_score.py --absolute
+
 # --- compare ----------------------------------------------------------------------
 stage compare data/model_comparison.json \
     python3 training/compare_models.py \

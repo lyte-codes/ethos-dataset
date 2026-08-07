@@ -1,0 +1,25 @@
+{
+  "mode": "absolute",
+  "scores": {
+    "base": {
+      "fluency": 0.1519,
+      "faithfulness": 0.7181,
+      "harmonic_mean": 0.2508
+    },
+    "v4": {
+      "fluency": 0.2612,
+      "faithfulness": 0.744,
+      "harmonic_mean": 0.3867
+    },
+    "v5": {
+      "fluency": 0.2092,
+      "faithfulness": 0.8172,
+      "harmonic_mean": 0.3331
+    },
+    "v6": {
+      "fluency": 0.2196,
+      "faithfulness": 0.7601,
+      "harmonic_mean": 0.3408
+    }
+  }
+}

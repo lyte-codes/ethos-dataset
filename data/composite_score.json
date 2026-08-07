@@ -1,0 +1,59 @@
+{
+  "weights": {
+    "fluency": 0.5,
+    "faithfulness": 0.5,
+    "phone_floor": 1.0,
+    "phone_floor_reason": "base model's own phone accuracy (100%), above chance",
+    "capped_reference": 0.0
+  },
+  "scores": {
+    "base": {
+      "fluency": 0.0,
+      "faithfulness": 0.0,
+      "composite": 0.0,
+      "phone_floor_breached": false,
+      "corruption_breakdown": {
+        "phone": 1.0,
+        "time": 1.0,
+        "unearned_name": 1.0,
+        "weekday": 0.938
+      }
+    },
+    "v4": {
+      "fluency": 100.0,
+      "faithfulness": 23.4,
+      "composite": 61.7,
+      "phone_floor_breached": false,
+      "corruption_breakdown": {
+        "phone": 1.0,
+        "time": 1.0,
+        "unearned_name": 1.0,
+        "weekday": 0.875
+      }
+    },
+    "v5": {
+      "fluency": 59.0,
+      "faithfulness": 100.0,
+      "composite": 79.5,
+      "phone_floor_breached": false,
+      "corruption_breakdown": {
+        "phone": 1.0,
+        "time": 1.0,
+        "unearned_name": 1.0,
+        "weekday": 0.875
+      }
+    },
+    "v6": {
+      "fluency": 68.0,
+      "faithfulness": 38.7,
+      "composite": 53.4,
+      "phone_floor_breached": false,
+      "corruption_breakdown": {
+        "phone": 1.0,
+        "time": 1.0,
+        "unearned_name": 1.0,
+        "weekday": 0.875
+      }
+    }
+  }
+}

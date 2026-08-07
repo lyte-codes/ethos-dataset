@@ -28,3 +28,7 @@ NEXT.md
 # ships the code and the synthetic data, never this.
 private/
 logs/
+
+# Local scratch draft of the ASR check. The working version — with the ~ expansion and
+# fp32 fixes this one is missing — is training/transcribe.py.
+whispertest.py

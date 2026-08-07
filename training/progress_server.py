@@ -345,6 +345,26 @@ def parse_asr(log: Path) -> dict:
     return {"finished": finished, "transcript": " ".join(lines).strip()}
 
 
+def current_hp_progress() -> dict | None:
+    """Step-level progress of whichever candidate is training right now, read from its
+    own per-candidate log. search_hyperparameters.py numbers those logs by launch order,
+    so the newest one by mtime is the one currently running."""
+    if not is_running("search_hyperparameters.py"):
+        return None
+    logs = sorted(Path("logs").glob("hpsearch-*.log"), key=lambda p: p.stat().st_mtime)
+    if not logs:
+        return None
+    reading = None
+    for line in tail_of(logs[-1], size=65536).splitlines():
+        match = PROGRESS.search(line)
+        if match:
+            step, total, elapsed, remaining, rate, unit = match.groups()
+            sec_per_step = float(rate) if unit == "s/it" else round(1 / float(rate), 2)
+            reading = {"step": int(step), "max_steps": int(total), "elapsed": elapsed,
+                       "remaining": remaining.strip(), "sec_per_step": sec_per_step}
+    return reading
+
+
 def parse_hpsearch(journal: Path, runlog: Path) -> dict:
     entries = []
     if journal.exists():
@@ -368,6 +388,18 @@ def parse_hpsearch(journal: Path, runlog: Path) -> dict:
         if line.startswith("=== generation") or line.startswith("  -- rung"):
             state["phase"] = line.strip("= -")
             break
+
+    # Total planned runs, read from the ladder the search prints at its own startup
+    # rather than duplicated here — the first "over N generations" line only, since a
+    # resumed run reprints the same ladder and a later occurrence would double-count.
+    full_text = runlog.read_text() if runlog.exists() else ""
+    header = full_text.split("over ", 1)[0]
+    per_generation = sum(int(n) for n in re.findall(r"(\d+) candidate\(s\) x", header))
+    gens_match = re.search(r"over (\d+) generations", full_text)
+    if per_generation and gens_match:
+        state["total_planned"] = per_generation * int(gens_match.group(1))
+
+    state["step_progress"] = current_hp_progress()
     return state
 
 
@@ -450,12 +482,17 @@ def build_queue(state: dict) -> list[dict]:
         composite = json.loads(Path("data/composite_score.json").read_text())
     except (OSError, json.JSONDecodeError):
         pass
+    composite_absolute = {}
+    try:
+        composite_absolute = json.loads(Path("data/composite_score_absolute.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        pass
     queue.append({"id": "composite", "kind": "composite",
                   "title": "Combined score — fluency + faithfulness",
                   "sub": "one number for both training phases, weighted toward not "
                          "inventing details",
                   "state": "done" if composite.get("scores") else "waiting",
-                  "composite": composite})
+                  "composite": composite, "composite_absolute": composite_absolute})
 
     queue.append({"id": "search", "kind": "hpsearch",
                   "title": "Hyperparameter search — 6 x 3 generations",

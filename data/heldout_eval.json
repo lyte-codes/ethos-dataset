@@ -1,0 +1,22 @@
+{
+  "base": {
+    "train_loss": 1.7624,
+    "heldout_loss": 1.8847,
+    "gap": 0.1223
+  },
+  "v4": {
+    "train_loss": 0.6285,
+    "heldout_loss": 1.3423,
+    "gap": 0.7138
+  },
+  "v6": {
+    "train_loss": 0.5303,
+    "heldout_loss": 1.5161,
+    "gap": 0.9857
+  },
+  "v5": {
+    "train_loss": 0.6482,
+    "heldout_loss": 1.5647,
+    "gap": 0.9165
+  }
+}

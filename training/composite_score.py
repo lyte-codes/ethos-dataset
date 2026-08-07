@@ -57,12 +57,41 @@ for where its default comes from and why:
 
     python3 training/composite_score.py
     python3 training/composite_score.py --fluency-weight 0.65   # an explicit choice, not a default
+
+Everything above is *relative to this batch*: base anchors 0, the best model observed
+anchors 100. That makes it a leaderboard, not a score — it answers "best of what we
+ran," and a number from one run cannot be compared to a number from another. `--absolute`
+switches to a second scale built the same way this module insists on everywhere else:
+derived quantities, no chosen constants, meaningful with no other model in the room.
+
+- **Fluency, absolute, is `exp(-heldout_loss)`** — the model's own average per-token
+  probability on the held-out set. Cross-entropy loss is already `-log(p)` of the
+  correct token; undoing the log is not a transform invented for this script, it is
+  converting the loss back into the probability it was computed from. Bounded in (0, 1)
+  by construction.
+
+- **Faithfulness, absolute, is `sigmoid(macro_margin)`** — the Bradley-Terry probability
+  that the model prefers the true detail over the corrupted one, from the same
+  macro-averaged margin used above. `sigmoid` is not an invented squashing function
+  here either: it is the exact link DPO's own training loss is built from
+  (`-log sigmoid(margin)`), just applied at eval time instead of train time. Also
+  bounded in (0, 1).
+
+- **The two are combined with a harmonic mean, not a weighted blend** — harmonic mean
+  needs no weight to choose, and unlike an arithmetic mean it punishes the model for
+  being weak in either dimension rather than letting one side's strength paper over the
+  other's. This is where the absolute scale can disagree with the relative one above:
+  a model can win on margin alone yet lose the harmonic mean if its held-out loss is the
+  worst of the batch, because harmonic mean will not let that win hide the loss.
+
+    python3 training/composite_score.py --absolute
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 
 CHANCE = 0.5  # a two-outcome preference judgment; not a parameter, a fact about the task
@@ -116,6 +145,27 @@ def faithfulness_scores(preference: dict) -> dict[str, float]:
     }
 
 
+def fluency_absolute(heldout: dict) -> dict[str, float]:
+    """Average per-token probability on held-out data, straight from the loss it was
+    computed from: exp(-heldout_loss). No batch, no anchor — meaningful on its own."""
+    return {name: round(math.exp(-v["heldout_loss"]), 4) for name, v in heldout.items()}
+
+
+def faithfulness_absolute(preference: dict) -> dict[str, float]:
+    """Bradley-Terry probability of preferring the true detail, from macro-margin via
+    the same sigmoid link DPO's own loss is built from — see the module docstring."""
+    result = {}
+    for name, entry in preference.items():
+        margin = macro_margin(entry)
+        if margin is not None:
+            result[name] = round(1 / (1 + math.exp(-margin)), 4)
+    return result
+
+
+def harmonic_mean(a: float, b: float) -> float:
+    return 0.0 if a + b <= 0 else 2 * a * b / (a + b)
+
+
 def phone_floor(heldout_names_with_pref: dict) -> tuple[float, str]:
     """Chance (50%), raised to the base model's own phone accuracy if that is higher.
 
@@ -140,11 +190,26 @@ def main() -> int:
     parser.add_argument("--phone-floor", type=float, default=None,
                         help="override the derived floor (chance, or the base model's own "
                              "phone accuracy if higher) with an explicit value")
-    parser.add_argument("--out", type=Path, default=Path("data/composite_score.json"))
+    parser.add_argument("--out", type=Path, default=None,
+                        help="default: data/composite_score.json, or "
+                             "data/composite_score_absolute.json under --absolute — "
+                             "different files because the two schemas aren't compatible "
+                             "and the dashboard reads the relative one by that name")
+    parser.add_argument("--absolute", action="store_true",
+                        help="score each model on its own — exp(-loss) fluency, "
+                             "sigmoid(margin) faithfulness, harmonic mean — instead of "
+                             "relative to the best model in this batch")
     args = parser.parse_args()
 
     heldout = json.loads(args.heldout.read_text()) if args.heldout.exists() else {}
     preference = json.loads(args.preference.read_text()) if args.preference.exists() else {}
+
+    if args.absolute:
+        out = args.out or Path("data/composite_score_absolute.json")
+        return main_absolute(heldout, preference, out)
+
+    args.out = args.out or Path("data/composite_score.json")
+
     fluency = fluency_scores(heldout)
     faithfulness = faithfulness_scores(preference)
     faithfulness_weight = 1 - args.fluency_weight
@@ -219,6 +284,40 @@ def main() -> int:
     }, indent=2))
     print(f"\nwritten to {args.out}")
     return 0
+
+
+def main_absolute(heldout: dict, preference: dict, out: Path) -> int:
+    fluency = fluency_absolute(heldout)
+    faithfulness = faithfulness_absolute(preference)
+    names = sorted(set(fluency) | set(faithfulness))
+    if not names:
+        print("no scores available yet — run eval_heldout.py and eval_preference.py first")
+        return 1
+
+    results = {}
+    print(f"{'model':<8} {'fluency':>9} {'faithful':>10} {'harmonic':>10}   "
+          "(fluency = exp(-loss), faithful = sigmoid(macro-margin))")
+    for name in names:
+        f_score = fluency.get(name)
+        g_score = faithfulness.get(name)
+        combined = round(harmonic_mean(f_score, g_score), 4) if f_score is not None and g_score is not None else None
+        results[name] = {"fluency": f_score, "faithfulness": g_score, "harmonic_mean": combined}
+        row = f"{name:<8} {fmt4(f_score):>9} {fmt4(g_score):>10} {fmt4(combined):>10}"
+        print(row)
+
+    complete = {n: r for n, r in results.items() if r["harmonic_mean"] is not None}
+    if complete:
+        best = max(complete.items(), key=lambda item: item[1]["harmonic_mean"])
+        print(f"\nbest (absolute): {best[0]} ({best[1]['harmonic_mean']})")
+        print("this can disagree with the relative ranking — see --help")
+
+    out.write_text(json.dumps({"mode": "absolute", "scores": results}, indent=2))
+    print(f"\nwritten to {out}")
+    return 0
+
+
+def fmt4(value: float | None) -> str:
+    return "—" if value is None else f"{value:.4f}"
 
 
 def fmt(value: float | None) -> str:

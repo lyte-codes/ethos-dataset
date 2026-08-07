@@ -1,0 +1,70 @@
+{
+  "base": {
+    "pairs": 68,
+    "accuracy": 0.9853,
+    "mean_margin": 1.3005,
+    "by_corruption": {
+      "phone": 1.0,
+      "time": 1.0,
+      "unearned_name": 1.0,
+      "weekday": 0.938
+    },
+    "margin_by_corruption": {
+      "phone": 0.8016,
+      "time": 0.5777,
+      "unearned_name": 1.9136,
+      "weekday": 0.4483
+    }
+  },
+  "v4": {
+    "pairs": 68,
+    "accuracy": 0.9706,
+    "mean_margin": 1.4496,
+    "by_corruption": {
+      "phone": 1.0,
+      "time": 1.0,
+      "unearned_name": 1.0,
+      "weekday": 0.875
+    },
+    "margin_by_corruption": {
+      "phone": 0.8411,
+      "time": 0.7818,
+      "unearned_name": 2.0981,
+      "weekday": 0.5463
+    }
+  },
+  "v6": {
+    "pairs": 68,
+    "accuracy": 0.9706,
+    "mean_margin": 1.543,
+    "by_corruption": {
+      "phone": 1.0,
+      "time": 1.0,
+      "unearned_name": 1.0,
+      "weekday": 0.875
+    },
+    "margin_by_corruption": {
+      "phone": 0.9104,
+      "time": 0.883,
+      "unearned_name": 2.2077,
+      "weekday": 0.6109
+    }
+  },
+  "v5": {
+    "pairs": 68,
+    "accuracy": 0.9706,
+    "mean_margin": 2.0067,
+    "by_corruption": {
+      "phone": 1.0,
+      "time": 1.0,
+      "unearned_name": 1.0,
+      "weekday": 0.875
+    },
+    "margin_by_corruption": {
+      "phone": 1.1092,
+      "time": 1.1857,
+      "unearned_name": 2.864,
+      "weekday": 0.8324
+    }
+  }
+}

@@ -124,9 +124,12 @@
   .stat .v { font-family: var(--mono); font-size: 1.05rem; font-weight: 600; font-variant-numeric: tabular-nums; }
   .stat .sub { font-family: var(--mono); font-size: .66rem; color: var(--muted); }
 
-  .track { position: relative; height: 20px; border-radius: 2px; overflow: hidden;
+  .bar { display: flex; align-items: center; gap: .7rem; }
+  .track { position: relative; flex: 1; height: 20px; border-radius: 2px; overflow: hidden;
            background: color-mix(in srgb, var(--text) 6%, transparent); }
   .fill { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: 2px 0 0 2px; }
+  .pct { font-family: var(--mono); font-size: .8rem; font-variant-numeric: tabular-nums;
+         color: var(--accent); font-weight: 600; min-width: 4.2ch; text-align: right; }
 
   .chart-scroll { overflow-x: auto; }
   svg { display: block; width: 100%; min-width: 420px; height: auto; }
@@ -276,10 +279,13 @@ function statGrid(host, cells) {
 }
 
 function progressBar(host, fraction) {
-  const track = document.createElement("div");
-  track.className = "track";
-  track.innerHTML = `<div class="fill" style="width:${(fraction * 100).toFixed(1)}%"></div>`;
-  host.appendChild(track);
+  const pct = Math.max(0, Math.min(1, fraction || 0)) * 100;
+  const row = document.createElement("div");
+  row.className = "bar";
+  row.innerHTML =
+    `<div class="track"><div class="fill" style="width:${pct.toFixed(1)}%"></div></div>` +
+    `<span class="pct">${pct.toFixed(1)}%</span>`;
+  host.appendChild(row);
 }
 
 function noteEl(host, text) {
@@ -460,6 +466,46 @@ const RENDER = {
                  `(${w.capped_reference != null ? w.capped_reference.toFixed(1) : "unavailable"}), ` +
                  "not a fixed number — a weighted average alone would let a bad phone number hide " +
                  "behind good ones everywhere else.");
+
+    const absData = item.composite_absolute || {};
+    const absScores = absData.scores || {};
+    const absNames = Object.keys(absScores);
+    if (absNames.length) {
+      const sub = document.createElement("h4");
+      sub.textContent = "Absolute — comparable across runs, not just within this batch";
+      host.appendChild(sub);
+      const absComplete = absNames.filter(n => absScores[n].harmonic_mean != null);
+      const bestAbs = absComplete.length
+        ? Math.max(...absComplete.map(n => absScores[n].harmonic_mean)) : null;
+      const bestAbsName = absComplete.find(n => absScores[n].harmonic_mean === bestAbs);
+      const bestRelName = names.find(n => scores[n].composite === bestComposite);
+      const absTable = document.createElement("table");
+      absTable.innerHTML =
+        "<tr><th>model</th><th>fluency</th><th>faithful.</th><th>harmonic mean</th></tr>" +
+        absNames.map(n => {
+          const s = absScores[n];
+          const hCell = s.harmonic_mean == null ? "—" : s.harmonic_mean.toFixed(4);
+          return `<tr><td>${n}</td>` +
+            `<td>${s.fluency != null ? s.fluency.toFixed(4) : "—"}</td>` +
+            `<td>${s.faithfulness != null ? s.faithfulness.toFixed(4) : "—"}</td>` +
+            `<td class="${s.harmonic_mean === bestAbs ? "best" : ""}">${hCell}</td></tr>`;
+        }).join("");
+      host.appendChild(absTable);
+      const disagrees = bestAbsName && bestRelName && bestAbsName !== bestRelName;
+      noteEl(host, "Fluency here is exp(-held-out loss) — the model's own average per-token " +
+                   "probability, not scaled against any other model. Faithfulness is " +
+                   "sigmoid(macro-margin), the Bradley-Terry probability of preferring the true " +
+                   "detail — the same link function DPO's loss is built from. Combined by harmonic " +
+                   "mean rather than a weighted blend, so a strong margin cannot hide a weak " +
+                   "held-out loss. Both numbers are meaningful with no other model in the room, so " +
+                   "unlike the table above, they carry over release to release." +
+                   (disagrees
+                     ? ` This is currently disagreeing with the relative table: ${bestRelName} wins ` +
+                       `relative (best margin in this batch), ${bestAbsName} wins absolute (best ` +
+                       "balance of fluency and faithfulness on its own). Neither is wrong — they're " +
+                       "answering different questions."
+                     : ""));
+    }
   },
 
   hpsearch(host, item) {
@@ -471,12 +517,29 @@ const RENDER = {
                    "roughly 21 hours.");
       return;
     }
+    if (s.total_planned) {
+      progressBar(host, Math.min(1, s.evaluated / s.total_planned));
+      noteEl(host, `${s.evaluated} of ${s.total_planned} candidate runs planned across all ` +
+                   "generations — includes failed/retried attempts, so this can dip back down.");
+    }
     statGrid(host, [
       ["Evaluated", s.evaluated, "candidate runs"],
       ["Best so far", s.best ? s.best.score.toFixed(4) : "—",
        s.best ? `at ${s.best.conversations} convs` : ""],
       ["Phase", s.phase || "—", ""],
     ]);
+    if (s.step_progress) {
+      const p = s.step_progress;
+      const sub = document.createElement("h4");
+      sub.textContent = "Current candidate";
+      host.appendChild(sub);
+      progressBar(host, p.step / p.max_steps);
+      statGrid(host, [
+        ["Step", p.step, `of ${p.max_steps}`],
+        ["Rate", p.sec_per_step.toFixed(1) + "s", "per step"],
+        ["Remaining", p.remaining, ""],
+      ]);
+    }
     if (s.best && s.best.candidate) {
       const c = s.best.candidate;
       noteEl(host, `Leader: rank ${c.lora_rank}, α×${c.lora_alpha_ratio}, dropout ${c.lora_dropout}, ` +
