@@ -413,6 +413,48 @@ const RENDER = {
     host.appendChild(table);
   },
 
+  composite(host, item) {
+    const data = item.composite || {};
+    const scores = data.scores || {};
+    const names = Object.keys(scores);
+    if (!names.length) {
+      noteEl(host, "Held-out loss judges supervised training and misjudges DPO — DPO optimises " +
+                   "the margin between chosen and rejected, not the likelihood of chosen alone, so " +
+                   "a preference run can score worse here while being the better model. Preference " +
+                   "accuracy judges DPO and says nothing about whether the model can still hold a " +
+                   "conversation. This combines both: 40% fluency (held-out loss, scaled to the base " +
+                   "model), 60% faithfulness (preference accuracy, weighted toward phone digits — " +
+                   "the costliest detail to invent). A model below the phone-accuracy floor is capped " +
+                   "regardless of everything else, matching the hard promotion gate rather than " +
+                   "averaging past it.");
+      return;
+    }
+    const complete = names.filter(n => scores[n].composite != null);
+    const bestComposite = complete.length ? Math.max(...complete.map(n => scores[n].composite)) : null;
+    const table = document.createElement("table");
+    table.innerHTML =
+      "<tr><th>model</th><th>fluency</th><th>faithful.</th><th>composite</th><th>phone acc.</th></tr>" +
+      names.map(n => {
+        const s = scores[n];
+        const capped = s.phone_floor_breached;
+        const compositeCell = s.composite == null ? "—" : s.composite.toFixed(1) + (capped ? " (capped)" : "");
+        const phoneAcc = (s.corruption_breakdown || {}).phone;
+        return `<tr><td>${n}</td>` +
+          `<td>${s.fluency != null ? s.fluency.toFixed(1) : "—"}</td>` +
+          `<td>${s.faithfulness != null ? s.faithfulness.toFixed(1) : "—"}</td>` +
+          `<td class="${!capped && s.composite === bestComposite ? "best" : ""}${capped ? " warn" : ""}">${compositeCell}</td>` +
+          `<td class="${phoneAcc != null && phoneAcc < (data.weights?.phone_floor ?? 0.6) ? "warn" : ""}">` +
+          `${phoneAcc != null ? (phoneAcc * 100).toFixed(0) + "%" : "—"}</td></tr>`;
+      }).join("");
+    host.appendChild(table);
+    const w = data.weights || {};
+    noteEl(host, `Weights: fluency ${((w.fluency ?? 0.4) * 100).toFixed(0)}%, faithfulness ` +
+                 `${((w.faithfulness ?? 0.6) * 100).toFixed(0)}%, phone floor ` +
+                 `${((w.phone_floor ?? 0.6) * 100).toFixed(0)}%. A model under the phone floor is ` +
+                 "capped regardless of its other numbers — a weighted average alone would let a bad " +
+                 "phone number hide behind good ones everywhere else.");
+  },
+
   hpsearch(host, item) {
     const s = item.search || {};
     if (!s.evaluated) {

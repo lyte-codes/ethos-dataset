@@ -441,6 +441,18 @@ def build_queue(state: dict) -> list[dict]:
                   "sub": "does it prefer the brief over a corruption",
                   "state": "done" if prefs else "waiting", "prefs": prefs})
 
+    composite = {}
+    try:
+        composite = json.loads(Path("data/composite_score.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        pass
+    queue.append({"id": "composite", "kind": "composite",
+                  "title": "Combined score — fluency + faithfulness",
+                  "sub": "one number for both training phases, weighted toward not "
+                         "inventing details",
+                  "state": "done" if composite.get("scores") else "waiting",
+                  "composite": composite})
+
     queue.append({"id": "search", "kind": "hpsearch",
                   "title": "Hyperparameter search — 6 x 3 generations",
                   "sub": "successive halving, 20 - 60 - 189 conversations",
