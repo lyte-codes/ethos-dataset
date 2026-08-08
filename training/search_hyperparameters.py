@@ -21,12 +21,38 @@ data.
 
 The proxy ranks, it does not predict. Confirm the winner with a full run before changing any
 defaults.
+
+**What a candidate is scored on, and why it changed.** This search originally ranked on
+held-out loss alone, and that was a mistake with a name: v7. Held-out loss is only the
+*fluency* half of what a build has to be good at, so searching on it found the most fluent
+configuration we have ever trained (held-out 1.260 against v4's 1.342, and the smallest
+memorisation gap of any build) which was simultaneously *worse than the untrained base
+model* at preferring a correct phone number to a corrupted one — base 0.802, v7 0.745. On
+its test call it confirmed a misread number back to the business as accurate. The search
+had no faithfulness term, so it optimised hard for half the problem and was blind to the
+half that actually matters for a booking agent.
+
+Candidates are now scored on the same absolute composite that composite_score.py --absolute
+reports, imported from there rather than reimplemented so the two can never drift:
+
+    harmonic_mean( exp(-held_out_loss), sigmoid(macro_margin) )
+
+Both terms are bounded in (0, 1) and mean something on their own, which matters here in a
+way it does not on a leaderboard: candidates are measured at different times against no
+common batch, so a batch-relative score would be meaningless. The harmonic mean is what
+stops a repeat of v7 — it refuses to let a superb fluency number carry a faithlessness
+number, because it collapses toward whichever term is weaker.
+
+**Higher is better now.** Held-out loss was minimised; this is maximised. Scores in the
+journal from before this change are held-out losses and are not comparable, so they are
+tagged by objective and the old ones are ignored on resume rather than silently mixed in.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import random
 import subprocess
 import sys
@@ -34,8 +60,41 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+# The metric lives in composite_score.py and is imported, not copied — a search that
+# optimises a subtly different number from the one the builds are judged on is exactly
+# the failure this change exists to fix.
+from composite_score import harmonic_mean, macro_margin
+
 JOURNAL = Path("logs/hpsearch.jsonl")
 WORKDIR = Path("checkpoints/hpsearch")
+
+# Bumped whenever the meaning of "score" changes. Journal rows carry it, and a resume
+# reuses only rows whose objective matches the one being run now.
+OBJECTIVE = "composite_floor_v1"
+
+# Where the base model's own measurements live, for the floor below.
+BASELINE = Path("data/preference_eval.json")
+
+
+def phone_floor() -> float | None:
+    """The untrained base model's own phone margin, or None if it has not been measured.
+
+    Blending alone does not prevent another v7, and the numbers say why: across the five
+    builds measured, exp(-loss) spans a factor of 1.87 while sigmoid(margin) spans only
+    1.14. The fluency term simply has more room to move, so it dominates any weighted or
+    harmonic combination — under the composite alone, v7 still outranks every other build
+    despite being worse than *no training at all* at preferring a correct phone number.
+
+    So faithfulness is enforced as a constraint rather than traded off. A candidate that
+    cannot beat the untrained model at the failure this agent exists to avoid is
+    disqualified regardless of how fluent it is. The threshold is measured, not chosen:
+    it is base's own score on the same pairs.
+    """
+    try:
+        entry = json.loads(BASELINE.read_text()).get("base")
+        return (entry or {}).get("margin_by_corruption", {}).get("phone")
+    except (OSError, json.JSONDecodeError):
+        return None
 
 # (conversations, how many survive to the next rung). The last rung's survivor count is the
 # number that breed the next generation.
@@ -86,16 +145,30 @@ def breed(a: Candidate, b: Candidate, rng: random.Random, mutation: float) -> Ca
 
 def load_journal(path: Path) -> dict[tuple[str, int], float]:
     """Scores are keyed by candidate *and* rung: the same configuration on more data is a
-    different measurement, not a repeat of one already paid for."""
+    different measurement, not a repeat of one already paid for.
+
+    Rows written under a different objective are skipped. Held-out losses (~1.3, lower
+    better) and composite scores (~0.4, higher better) occupy overlapping ranges while
+    meaning opposite things, so mixing them would not raise an error — it would quietly
+    rank the search backwards.
+    """
     if not path.exists():
         return {}
-    scored = {}
+    scored, stale = {}, 0
     for line in path.read_text().splitlines():
         if not line.strip():
             continue
         entry = json.loads(line)
-        if entry.get("score") is not None:
-            scored[(entry["key"], entry.get("conversations", 0))] = entry["score"]
+        if entry.get("score") is None:
+            continue
+        # Rows predating the objective field are held-out losses by definition.
+        if entry.get("objective", "heldout_loss") != OBJECTIVE:
+            stale += 1
+            continue
+        scored[(entry["key"], entry.get("conversations", 0))] = entry["score"]
+    if stale:
+        print(f"ignoring {stale} journal entr{'y' if stale == 1 else 'ies'} scored under a "
+              f"previous objective", flush=True)
     return scored
 
 
@@ -108,7 +181,13 @@ def parse_rungs(text: str) -> list[tuple[int, int]]:
 
 
 def evaluate(candidate: Candidate, args, index: int, conversations: int) -> float | None:
-    """Train the candidate on this rung's conversations and return its held-out loss."""
+    """Train the candidate and return its absolute composite — higher is better.
+
+    Both halves are measured: held-out loss for whether it can still hold a conversation,
+    preference margin for whether it would rather say what the brief contained than
+    something it made up. See the module docstring for why one without the other is not
+    enough.
+    """
     output = WORKDIR / f"cand-{index:03d}"
     modules = ("q_proj,k_proj,v_proj,o_proj" if candidate.attention_only
                else "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj")
@@ -140,9 +219,39 @@ def evaluate(candidate: Candidate, args, index: int, conversations: int) -> floa
         if subprocess.run(scoring, stdout=handle, stderr=subprocess.STDOUT).returncode != 0:
             return None
 
+    # The faithfulness half. Roughly six minutes against a candidate's twenty-plus, which
+    # is a cheap price for not shipping another model that invents phone numbers.
+    pref_path = WORKDIR / f"pref-{index:03d}.json"
+    preference = [
+        sys.executable, "training/eval_preference.py",
+        "--adapter", f"c{index}:{output}", "--data", str(args.data),
+        "--dtype", "bfloat16", "--out", str(pref_path),
+    ]
+    with log.open("a") as handle:
+        if subprocess.run(preference, stdout=handle, stderr=subprocess.STDOUT).returncode != 0:
+            return None
+
     try:
-        scores = json.loads(score_path.read_text())
-        return next(iter(scores.values()))["heldout_loss"]
+        loss = next(iter(json.loads(score_path.read_text()).values()))["heldout_loss"]
+        pref_entry = next(iter(json.loads(pref_path.read_text()).values()))
+        margin = macro_margin(pref_entry)
+        if margin is None:
+            return None
+        # Identical to composite_score.py --absolute: undo the log on the loss to get the
+        # model's own per-token probability, and put the margin through the same sigmoid
+        # DPO's loss is built from. Neither needs another model to mean something.
+        composite = round(harmonic_mean(math.exp(-loss), 1 / (1 + math.exp(-margin))), 4)
+
+        floor = phone_floor()
+        phone = pref_entry.get("margin_by_corruption", {}).get("phone")
+        if floor is not None and phone is not None and phone < floor:
+            print(f"     DISQUALIFIED  composite {composite:.4f} but phone margin "
+                  f"{phone:.3f} < base {floor:.3f}", flush=True)
+            # Recorded as measured rather than failed: it ran fine and the result is real,
+            # it just is not allowed to win. Zero sorts it last without pretending the run
+            # never happened, which a None would.
+            return 0.0
+        return composite
     except (OSError, json.JSONDecodeError, StopIteration, KeyError):
         return None
     finally:
@@ -206,6 +315,7 @@ def main() -> int:
                             "generation": generation, "rung": rung,
                             "conversations": conversations, "key": candidate.key(),
                             "candidate": asdict(candidate), "score": score,
+                            "objective": OBJECTIVE,
                             "seconds": round(time.time() - started),
                         }) + "\n")
                     if score is None:
@@ -222,7 +332,8 @@ def main() -> int:
 
             # Ranking happens inside a rung and only the ordering moves up. Scores from
             # different amounts of data are not comparable and are never compared.
-            scored.sort(key=lambda item: item[0])
+            # Descending: the composite is maximised, unlike the held-out loss it replaced.
+            scored.sort(key=lambda item: item[0], reverse=True)
             top_of_ladder = scored
             climbing = [c for _, c in scored[:survivors]]
             print(f"     best {scored[0][0]:.4f}, promoting {len(climbing)}\n", flush=True)
@@ -230,7 +341,7 @@ def main() -> int:
         if top_of_ladder:
             best_score, best_candidate = top_of_ladder[0]
             reached = rungs[min(len(rungs), max(1, len(rungs))) - 1][0]
-            if champion is None or best_score < champion[0]:
+            if champion is None or best_score > champion[0]:
                 champion = (best_score, best_candidate, reached)
 
         if generation < args.generations and top_of_ladder:
@@ -248,7 +359,7 @@ def main() -> int:
 
     print("=== best configuration ===")
     print(json.dumps(asdict(champion[1]), indent=2))
-    print(f"held-out loss {champion[0]:.4f} at {champion[2]} conversations")
+    print(f"composite {champion[0]:.4f} at {champion[2]} conversations (higher is better)")
     print("\nThat score comes from a ladder built for ranking, not for predicting. Confirm it "
           "with a full run before changing the defaults in train_lora.py.")
     return 0
