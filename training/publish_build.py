@@ -52,6 +52,33 @@ def git_sha() -> str:
     return result.stdout.strip() or "unknown"
 
 
+def infer_stage(adapter: Path) -> str:
+    """Read the stage off what the run actually wrote, not off the build's name.
+
+    This used to be a hardcoded list of which lineage names were preference runs. It
+    named v7 as one, because v7 was planned as the DPO build before the plan changed —
+    and by the time it shipped, v7 was supervised and v8 was the preference run. Both
+    were published with their stages swapped. A build's own hyperparameters cannot go
+    stale that way: train_dpo.py records the sft_adapter it was applied to and its beta,
+    neither of which a supervised run has.
+    """
+    try:
+        saved = json.loads((adapter / "hyperparameters.json").read_text())
+        if "sft_adapter" in saved or "beta" in saved:
+            return "dpo"
+        if "lora_rank" in saved or "target_modules" in saved:
+            return "sft"
+    except (OSError, json.JSONDecodeError):
+        pass
+    # No hyperparameters file — fall back to the directory name, and say so rather than
+    # quietly guessing "sft" for something that might not be.
+    if "dpo" in adapter.name:
+        return "dpo"
+    print(f"warning: could not determine the training stage from {adapter}; assuming sft. "
+          "Pass --stage to be certain.", file=sys.stderr)
+    return "sft"
+
+
 def dirty_tree() -> bool:
     result = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
     return bool(result.stdout.strip())
@@ -91,7 +118,7 @@ def main() -> int:
         parser.error(f"{weights} not found — is this a finished adapter?")
 
     version = f"{args.target}-build.{next_build_number(args.target, args.registry)}"
-    stage = args.stage or ("dpo" if "dpo" in args.adapter.name or args.lineage in {"v5", "v7"} else "sft")
+    stage = args.stage or infer_stage(args.adapter)
 
     # Hash every asset, not just the weights: a build is identified by everything that
     # ships with it, and a config that drifted is as much a different build as new weights.
