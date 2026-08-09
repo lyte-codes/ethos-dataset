@@ -1,22 +1,32 @@
 {
   "base": {
-    "train_loss": 1.7624,
+    "train_loss": 1.7154,
     "heldout_loss": 1.8847,
-    "gap": 0.1223
+    "gap": 0.1693
   },
   "v4": {
-    "train_loss": 0.6285,
+    "train_loss": 0.5947,
     "heldout_loss": 1.3423,
-    "gap": 0.7138
+    "gap": 0.7476
   },
   "v6": {
-    "train_loss": 0.5303,
+    "train_loss": 0.4867,
     "heldout_loss": 1.5161,
-    "gap": 0.9857
+    "gap": 1.0293
   },
   "v5": {
-    "train_loss": 0.6482,
+    "train_loss": 0.6077,
     "heldout_loss": 1.5647,
-    "gap": 0.9165
+    "gap": 0.957
+  },
+  "v7": {
+    "train_loss": 0.7502,
+    "heldout_loss": 1.26,
+    "gap": 0.5098
+  },
+  "v8": {
+    "train_loss": 0.7395,
+    "heldout_loss": 1.3124,
+    "gap": 0.5729
   }
 }

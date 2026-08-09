@@ -326,6 +326,37 @@ def parse_dpo(log: Path) -> dict:
     return {"precompute": precompute, "training": training, "losses": losses}
 
 
+def parse_sft_progress(log: Path) -> dict:
+    """Step position and loss history for a supervised run that is still going.
+
+    Once a run finishes, sft_history() reads the same losses back out of
+    trainer_state.json, which is authoritative. This exists for the window before that
+    file is written, when the log tail is the only place the progress is visible.
+    """
+    text = tail_of(log)
+    if not text:
+        return {}
+    training = None
+    for line in text.splitlines():
+        match = PROGRESS.search(line)
+        if match:
+            step, total, elapsed, remaining, rate, unit = match.groups()
+            # train_lora reports s/it while it is slow and flips to it/s when it is fast;
+            # normalising here keeps the dashboard from showing "0.1s per step".
+            sec_per_step = float(rate) if unit == "s/it" else round(1 / float(rate), 2)
+            training = {"step": int(step), "max_steps": int(total), "elapsed": elapsed,
+                        "remaining": remaining.strip(), "sec_per_step": sec_per_step}
+    losses = []
+    for blob in LOSS_DICT.findall(text):
+        try:
+            entry = json.loads(blob.replace("'", '"'))
+        except json.JSONDecodeError:
+            continue
+        losses.append({"loss": entry.get("loss"), "gn": entry.get("grad_norm"),
+                       "step": len(losses) * 10 + 10})
+    return {"training": training, "losses": losses}
+
+
 def parse_asr(log: Path) -> dict:
     # Reads the whole file rather than a byte-limited tail. It is a dedicated per-stage
     # log now (small by construction) — a tail read is exactly what silently dropped this
@@ -494,6 +525,23 @@ def build_queue(state: dict) -> list[dict]:
                   "state": "done" if composite.get("scores") else "waiting",
                   "composite": composite, "composite_absolute": composite_absolute})
 
+    # v7 — the first build trained on hyperparameters the search chose rather than ones
+    # picked by hand. Sits after the composite score because that is what it has to beat.
+    v7_dir = Path("checkpoints/ethos-v7")
+    v7_done = (v7_dir / "adapter_model.safetensors").exists()
+    v7_progress = parse_sft_progress(Path("logs/v7-train.log"))
+    v7_running = is_running("ethos-v7")   # the output path appears in train_lora's argv
+    v7_state = ("done" if v7_done else "running" if v7_running
+                else "failed" if v7_progress.get("training") else "waiting")
+    queue.append({"id": "v7", "kind": "sft",
+                  "title": "v7 — supervised, searched hyperparameters",
+                  "sub": published.get("v7", "unpublished — review before shipping"),
+                  "state": v7_state,
+                  "score": scores.get("v7"),
+                  "training": v7_progress.get("training"),
+                  # trainer_state.json once it exists, the log tail before that
+                  "log": sft_history(v7_dir) or v7_progress.get("losses") or []})
+
     queue.append({"id": "search", "kind": "hpsearch",
                   "title": "Hyperparameter search — 6 x 3 generations",
                   "sub": "successive halving, 20 - 60 - 189 conversations",
@@ -598,6 +646,7 @@ ITEM_LOGS = {
     "heldout": Path("logs/heldout_full.log"),
     "prefs": Path("logs/preference_margin.log"),
     "composite": Path("logs/composite.log"),
+    "v7": Path("logs/v7-train.log"),
     "search": Path("logs/hpsearch_run.log"),
 }
 

@@ -20,6 +20,16 @@
       "fluency": 0.2196,
       "faithfulness": 0.7601,
       "harmonic_mean": 0.3408
+    },
+    "v7": {
+      "fluency": 0.2837,
+      "faithfulness": 0.7253,
+      "harmonic_mean": 0.4079
+    },
+    "v8": {
+      "fluency": 0.2692,
+      "faithfulness": 0.7716,
+      "harmonic_mean": 0.3991
     }
   }
 }

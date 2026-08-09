@@ -128,8 +128,16 @@
   .track { position: relative; flex: 1; height: 20px; border-radius: 2px; overflow: hidden;
            background: color-mix(in srgb, var(--text) 6%, transparent); }
   .fill { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: 2px 0 0 2px; }
+  /* The run in flight: same colour, half weight, so it reads as "counted, but not banked
+     yet" rather than as a separate quantity. It spans the whole of done+active and the
+     solid fill is painted over its left end, so the two never share an edge — segments
+     butted together land on a fractional pixel and the browser blends the seam into a
+     visible pale line. Overlapping means the boundary is one hard edge, not two soft ones. */
+  .fill.partial { background: color-mix(in srgb, var(--accent) 42%, transparent); }
+  /* Wide enough for "100.000%" so the bar's right edge does not shift as digits are
+     gained or lost — tabular-nums keeps the digits themselves from jittering. */
   .pct { font-family: var(--mono); font-size: .8rem; font-variant-numeric: tabular-nums;
-         color: var(--accent); font-weight: 600; min-width: 4.2ch; text-align: right; }
+         color: var(--accent); font-weight: 600; min-width: 8ch; text-align: right; }
 
   .chart-scroll { overflow-x: auto; }
   svg { display: block; width: 100%; min-width: 420px; height: auto; }
@@ -278,13 +286,23 @@ function statGrid(host, cells) {
   host.appendChild(grid);
 }
 
-function progressBar(host, fraction) {
-  const pct = Math.max(0, Math.min(1, fraction || 0)) * 100;
+function progressBar(host, fraction, partial) {
+  const done = Math.max(0, Math.min(1, fraction || 0)) * 100;
+  // The in-flight slice rides on top of the finished part and cannot push the total past
+  // 100 — a bar that overshoots reads as a bug even when the arithmetic is right.
+  const active = Math.max(0, Math.min(100 - done, (partial || 0) * 100));
   const row = document.createElement("div");
   row.className = "bar";
+  // Painted back to front, both anchored at 0: the pale layer runs the whole of
+  // done+active, the solid one covers its left end. See the .fill.partial comment.
   row.innerHTML =
-    `<div class="track"><div class="fill" style="width:${pct.toFixed(1)}%"></div></div>` +
-    `<span class="pct">${pct.toFixed(1)}%</span>`;
+    `<div class="track">` +
+      (active > 0
+        ? `<div class="fill partial" style="width:${(done + active).toFixed(3)}%"></div>`
+        : "") +
+      `<div class="fill" style="width:${done.toFixed(3)}%"></div>` +
+    `</div>` +
+    `<span class="pct">${(done + active).toFixed(3)}%</span>`;
   host.appendChild(row);
 }
 
@@ -310,6 +328,15 @@ const RENDER = {
   },
 
   sft(host, item) {
+    const t = item.training;
+    if (t && !item.score) {
+      progressBar(host, t.step / t.max_steps);
+      statGrid(host, [
+        ["Step", `${t.step} / ${t.max_steps}`, "optimizer steps"],
+        ["Rate", t.sec_per_step.toFixed(1) + "s", "per step"],
+        ["Remaining", t.remaining, `${t.elapsed} elapsed`],
+      ]);
+    }
     if (item.score) {
       statGrid(host, [
         ["Held-out loss", item.score.heldout_loss.toFixed(3), "lower is better"],
@@ -317,7 +344,14 @@ const RENDER = {
         ["Gap", (item.score.gap >= 0 ? "+" : "") + item.score.gap.toFixed(3), "memorisation signal"],
       ]);
     }
-    lossChart(host, item.log, null);
+    lossChart(host, item.log, t ? t.max_steps : null);
+    if (item.id === "v7") {
+      noteEl(host, "The first build whose hyperparameters were measured rather than chosen: " +
+                   "rank 16, α×4, dropout 0.1, lr 4e-4, accum 2, attention-only, which scored " +
+                   "<code>1.2632</code> against v4's <code>1.342</code> in the search — at one " +
+                   "epoch. This runs two, which the search never tested, so a worse result here " +
+                   "points at the epoch count before it points at the hyperparameters.");
+    }
   },
 
   dpo(host, item) {
@@ -517,10 +551,18 @@ const RENDER = {
                    "roughly 21 hours.");
       return;
     }
+    const p = s.step_progress;
     if (s.total_planned) {
-      progressBar(host, Math.min(1, s.evaluated / s.total_planned));
+      // One bar, two segments: runs already scored, plus how far into the next one we are.
+      // Two separate bars invited the reading that they were two independent things to
+      // finish, when the second is a slice of the first.
+      const inFlight = p ? (p.step / p.max_steps) / s.total_planned : 0;
+      progressBar(host, Math.min(1, s.evaluated / s.total_planned), inFlight);
       noteEl(host, `${s.evaluated} of ${s.total_planned} candidate runs planned across all ` +
-                   "generations — includes failed/retried attempts, so this can dip back down.");
+                   "generations, plus the lighter slice for the one training now — includes " +
+                   "failed/retried attempts, so this can dip back down. Runs are counted, not " +
+                   "weighted: a 20-conversation run and a 189-conversation one are both one " +
+                   "run here, so the bar moves faster through the cheap early rungs.");
     }
     statGrid(host, [
       ["Evaluated", s.evaluated, "candidate runs"],
@@ -528,16 +570,11 @@ const RENDER = {
        s.best ? `at ${s.best.conversations} convs` : ""],
       ["Phase", s.phase || "—", ""],
     ]);
-    if (s.step_progress) {
-      const p = s.step_progress;
-      const sub = document.createElement("h4");
-      sub.textContent = "Current candidate";
-      host.appendChild(sub);
-      progressBar(host, p.step / p.max_steps);
+    if (p) {
       statGrid(host, [
-        ["Step", p.step, `of ${p.max_steps}`],
+        ["Step", `${p.step} / ${p.max_steps}`, "current candidate"],
         ["Rate", p.sec_per_step.toFixed(1) + "s", "per step"],
-        ["Remaining", p.remaining, ""],
+        ["Remaining", p.remaining, "on this candidate"],
       ]);
     }
     if (s.best && s.best.candidate) {

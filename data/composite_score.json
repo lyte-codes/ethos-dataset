@@ -20,9 +20,9 @@
       }
     },
     "v4": {
-      "fluency": 100.0,
+      "fluency": 86.8,
       "faithfulness": 23.4,
-      "composite": 61.7,
+      "composite": 55.1,
       "phone_floor_breached": false,
       "corruption_breakdown": {
         "phone": 1.0,
@@ -32,9 +32,9 @@
       }
     },
     "v5": {
-      "fluency": 59.0,
+      "fluency": 51.2,
       "faithfulness": 100.0,
-      "composite": 79.5,
+      "composite": 75.6,
       "phone_floor_breached": false,
       "corruption_breakdown": {
         "phone": 1.0,
@@ -44,9 +44,33 @@
       }
     },
     "v6": {
-      "fluency": 68.0,
+      "fluency": 59.0,
       "faithfulness": 38.7,
-      "composite": 53.4,
+      "composite": 48.9,
+      "phone_floor_breached": false,
+      "corruption_breakdown": {
+        "phone": 1.0,
+        "time": 1.0,
+        "unearned_name": 1.0,
+        "weekday": 0.875
+      }
+    },
+    "v7": {
+      "fluency": 100.0,
+      "faithfulness": 6.4,
+      "composite": 53.2,
+      "phone_floor_breached": false,
+      "corruption_breakdown": {
+        "phone": 1.0,
+        "time": 1.0,
+        "unearned_name": 1.0,
+        "weekday": 0.875
+      }
+    },
+    "v8": {
+      "fluency": 91.6,
+      "faithfulness": 50.2,
+      "composite": 70.9,
       "phone_floor_breached": false,
       "corruption_breakdown": {
         "phone": 1.0,
